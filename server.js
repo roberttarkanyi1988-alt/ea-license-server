@@ -16,7 +16,7 @@ app.get('/admin-panel', (req, res) => {
   if (!k || k !== (process.env.ADMIN_KEY || 'schimba-aceasta-cheie-secreta')) {
     return res.status(401).send('Unauthorized');
   }
-  res.sendFile(path.join(__dirname, 'admin', 'index.html'));
+  res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 // ─── Database Setup ───────────────────────────────────────────────────────────
