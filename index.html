@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EA License Manager</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:       #0a0c0f;
+    --surface:  #111318;
+    --card:     #161a22;
+    --border:   #1e2330;
+    --accent:   #00e5a0;
+    --accent2:  #0066ff;
+    --danger:   #ff3d5a;
+    --warn:     #ffb800;
+    --text:     #e8eaf0;
+    --muted:    #5a6070;
+    --mono:     'JetBrains Mono', monospace;
+    --sans:     'Syne', sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── Grid bg ── */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(var(--border) 1px, transparent 1px),
+      linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 40px 40px;
+    opacity: 0.35;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ── Header ── */
+  header {
+    position: sticky; top: 0; z-index: 100;
+    background: rgba(10,12,15,0.92);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    padding: 0 32px;
+    display: flex; align-items: center; justify-content: space-between;
+    height: 60px;
+  }
+
+  .logo {
+    font-size: 15px; font-weight: 800; letter-spacing: 0.08em;
+    text-transform: uppercase;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .logo-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 12px var(--accent);
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%,100% { opacity: 1; transform: scale(1); }
+    50%      { opacity: 0.5; transform: scale(0.8); }
+  }
+
+  .header-right { display: flex; align-items: center; gap: 12px; }
+
+  .api-key-input {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 6px 12px;
+    width: 220px;
+    outline: none;
+    transition: border-color .2s;
+  }
+  .api-key-input:focus { border-color: var(--accent); }
+
+  /* ── Layout ── */
+  main {
+    position: relative; z-index: 1;
+    max-width: 1280px; margin: 0 auto;
+    padding: 32px 24px;
+  }
+
+  /* ── Stats bar ── */
+  .stats {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;
+    margin-bottom: 32px;
+  }
+  .stat-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 24px;
+    position: relative; overflow: hidden;
+  }
+  .stat-card::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  }
+  .stat-card.green::before  { background: var(--accent); }
+  .stat-card.blue::before   { background: var(--accent2); }
+  .stat-card.yellow::before { background: var(--warn); }
+  .stat-card.red::before    { background: var(--danger); }
+
+  .stat-label { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+  .stat-value { font-size: 32px; font-weight: 800; font-family: var(--mono); }
+  .stat-card.green  .stat-value { color: var(--accent); }
+  .stat-card.blue   .stat-value { color: var(--accent2); }
+  .stat-card.yellow .stat-value { color: var(--warn); }
+  .stat-card.red    .stat-value { color: var(--danger); }
+
+  /* ── Two columns ── */
+  .cols { display: grid; grid-template-columns: 1fr 380px; gap: 24px; align-items: start; }
+
+  /* ── Section ── */
+  .section {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .section-header {
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .section-title { font-size: 13px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+
+  /* ── Table ── */
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    font-family: var(--mono); font-size: 10px; font-weight: 600;
+    letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
+    padding: 10px 20px; text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  td {
+    padding: 14px 20px;
+    font-family: var(--mono); font-size: 12px;
+    border-bottom: 1px solid rgba(30,35,48,0.5);
+    vertical-align: middle;
+  }
+  tr:last-child td { border-bottom: none; }
+  tr { transition: background .15s; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+
+  /* ── Badge ── */
+  .badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 10px; border-radius: 4px;
+    font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  }
+  .badge::before { content: ''; width: 5px; height: 5px; border-radius: 50%; }
+  .badge-active    { background: rgba(0,229,160,.1); color: var(--accent);  }
+  .badge-active::before { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+  .badge-expired   { background: rgba(255,61,90,.1);  color: var(--danger); }
+  .badge-expired::before { background: var(--danger); }
+  .badge-suspended { background: rgba(255,184,0,.1);  color: var(--warn);   }
+  .badge-suspended::before { background: var(--warn); }
+
+  /* ── Days indicator ── */
+  .days-bar { display: flex; align-items: center; gap: 8px; }
+  .days-num { font-weight: 700; min-width: 28px; }
+  .days-num.ok      { color: var(--accent); }
+  .days-num.warning { color: var(--warn); }
+  .days-num.danger  { color: var(--danger); }
+
+  /* ── Action buttons ── */
+  .actions { display: flex; gap: 6px; }
+  .btn-icon {
+    background: none; border: 1px solid var(--border);
+    border-radius: 6px; cursor: pointer;
+    width: 30px; height: 30px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; transition: all .15s; color: var(--muted);
+  }
+  .btn-icon:hover.suspend  { border-color: var(--warn);   color: var(--warn);   background: rgba(255,184,0,.08); }
+  .btn-icon:hover.activate { border-color: var(--accent); color: var(--accent); background: rgba(0,229,160,.08); }
+  .btn-icon:hover.delete   { border-color: var(--danger); color: var(--danger); background: rgba(255,61,90,.08); }
+
+  /* ── Form panel ── */
+  .form-panel { padding: 24px; }
+  .form-group { margin-bottom: 16px; }
+  label { display: block; font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+
+  input[type=text], input[type=number], input[type=email], select {
+    width: 100%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    padding: 10px 14px;
+    outline: none;
+    transition: border-color .2s;
+  }
+  input:focus, select:focus { border-color: var(--accent); }
+  select { cursor: pointer; }
+  select option { background: var(--surface); }
+
+  .btn-primary {
+    width: 100%; padding: 12px;
+    background: var(--accent); color: #000;
+    border: none; border-radius: 8px;
+    font-family: var(--sans); font-size: 13px; font-weight: 800;
+    letter-spacing: .06em; text-transform: uppercase;
+    cursor: pointer; transition: all .2s;
+  }
+  .btn-primary:hover { background: #00ffb3; transform: translateY(-1px); box-shadow: 0 4px 20px rgba(0,229,160,.3); }
+  .btn-primary:active { transform: translateY(0); }
+
+  /* ── Toast ── */
+  #toast {
+    position: fixed; bottom: 32px; right: 32px; z-index: 9999;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 20px;
+    font-family: var(--mono); font-size: 13px;
+    display: flex; align-items: center; gap: 10px;
+    transform: translateY(80px); opacity: 0;
+    transition: all .3s cubic-bezier(.34,1.56,.64,1);
+    pointer-events: none;
+  }
+  #toast.show { transform: translateY(0); opacity: 1; }
+  #toast.success { border-color: var(--accent); }
+  #toast.error   { border-color: var(--danger); }
+
+  /* ── Loader ── */
+  .loading { text-align: center; padding: 40px; color: var(--muted); font-family: var(--mono); font-size: 13px; }
+  .spinner {
+    display: inline-block; width: 16px; height: 16px;
+    border: 2px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin .6s linear infinite; margin-right: 8px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Search ── */
+  .search-wrap { position: relative; }
+  .search-wrap input {
+    padding-left: 36px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text);
+    font-family: var(--mono); font-size: 12px;
+    outline: none; transition: border-color .2s; width: 200px;
+  }
+  .search-wrap input:focus { border-color: var(--accent); }
+  .search-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 13px; pointer-events: none; }
+
+  .empty { text-align: center; padding: 48px; color: var(--muted); font-family: var(--mono); font-size: 12px; }
+
+  @media (max-width: 900px) {
+    .cols { grid-template-columns: 1fr; }
+    .stats { grid-template-columns: repeat(2,1fr); }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-dot"></div>
+    EA License Manager
+  </div>
+  <div class="header-right">
+    <input class="api-key-input" type="password" id="adminKey" placeholder="Admin API Key..." autocomplete="off">
+    <button class="btn-icon activate" onclick="loadAll()" title="Refresh" style="width:auto;padding:0 14px;font-size:12px;font-family:var(--sans);">⟳ Refresh</button>
+  </div>
+</header>
+
+<main>
+  <!-- Stats -->
+  <div class="stats" id="statsBar">
+    <div class="stat-card green"><div class="stat-label">Active</div><div class="stat-value" id="sActive">—</div></div>
+    <div class="stat-card yellow"><div class="stat-label">Expiră curând</div><div class="stat-value" id="sExpiring">—</div></div>
+    <div class="stat-card red"><div class="stat-label">Expirate</div><div class="stat-value" id="sExpired">—</div></div>
+    <div class="stat-card blue"><div class="stat-label">Total</div><div class="stat-value" id="sTotal">—</div></div>
+  </div>
+
+  <div class="cols">
+    <!-- Table -->
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">Licențe</span>
+        <div class="search-wrap">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="searchInput" placeholder="Caută cont, email..." oninput="filterTable()">
+        </div>
+      </div>
+      <div id="tableWrap">
+        <div class="loading"><span class="spinner"></span>Introdu API key și apasă Refresh</div>
+      </div>
+    </div>
+
+    <!-- Add form -->
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">Adaugă / Reînnoiește</span>
+      </div>
+      <div class="form-panel">
+        <div class="form-group">
+          <label>Nr. Cont MT5</label>
+          <input type="text" id="fAccount" placeholder="ex: 12345678">
+        </div>
+        <div class="form-group">
+          <label>Email client</label>
+          <input type="email" id="fEmail" placeholder="client@email.com">
+        </div>
+        <div class="form-group">
+          <label>Luni abonament</label>
+          <select id="fMonths">
+            <option value="1">1 lună</option>
+            <option value="3">3 luni</option>
+            <option value="6">6 luni</option>
+            <option value="12">12 luni</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Plan</label>
+          <select id="fPlan">
+            <option value="monthly">Monthly</option>
+            <option value="quarterly">Quarterly</option>
+            <option value="annual">Annual</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Note</label>
+          <input type="text" id="fNotes" placeholder="ex: Plată Revolut confirmată">
+        </div>
+        <button class="btn-primary" onclick="addLicense()">➕ Adaugă / Reînnoiește</button>
+      </div>
+    </div>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script>
+const API = '';  // Dacă servești admin de pe același server, lasă gol. Altfel: 'https://api.domeniultau.com'
+
+let allLicenses = [];
+
+function key() { return document.getElementById('adminKey').value.trim(); }
+
+async function apiFetch(path, method = 'GET', body = null) {
+  const opts = {
+    method,
+    headers: { 'x-admin-key': key(), 'Content-Type': 'application/json' }
+  };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(API + path, opts);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+async function loadAll() {
+  if (!key()) { toast('Introdu API key!', 'error'); return; }
+  document.getElementById('tableWrap').innerHTML = '<div class="loading"><span class="spinner"></span>Se încarcă...</div>';
+  try {
+    allLicenses = await apiFetch('/admin/licenses');
+    renderTable(allLicenses);
+    updateStats(allLicenses);
+  } catch(e) {
+    document.getElementById('tableWrap').innerHTML = '<div class="empty">❌ Eroare: ' + e.message + '</div>';
+  }
+}
+
+function updateStats(data) {
+  const now = new Date();
+  const active    = data.filter(r => r.status === 'active' && daysLeft(r.expires_at) > 7).length;
+  const expiring  = data.filter(r => r.status === 'active' && daysLeft(r.expires_at) <= 7 && daysLeft(r.expires_at) > 0).length;
+  const expired   = data.filter(r => r.status === 'expired' || daysLeft(r.expires_at) <= 0).length;
+  document.getElementById('sActive').textContent   = active;
+  document.getElementById('sExpiring').textContent = expiring;
+  document.getElementById('sExpired').textContent  = expired;
+  document.getElementById('sTotal').textContent    = data.length;
+}
+
+function daysLeft(dateStr) {
+  const exp = new Date(dateStr);
+  const now = new Date();
+  return Math.ceil((exp - now) / 86400000);
+}
+
+function renderTable(data) {
+  if (!data.length) {
+    document.getElementById('tableWrap').innerHTML = '<div class="empty">Nu există licențe. Adaugă prima licență →</div>';
+    return;
+  }
+
+  let rows = data.map(r => {
+    const dl = daysLeft(r.expires_at);
+    const dlClass = dl <= 3 ? 'danger' : dl <= 7 ? 'warning' : 'ok';
+    const dlText  = r.status === 'suspended' ? '—' : (dl <= 0 ? 'Expirat' : dl + 'z');
+    const badgeClass = r.status === 'active' ? 'badge-active' : r.status === 'suspended' ? 'badge-suspended' : 'badge-expired';
+    const badgeText  = r.status === 'active' ? 'Activ' : r.status === 'suspended' ? 'Suspendat' : 'Expirat';
+    const expDate = r.expires_at ? r.expires_at.split('T')[0] : '—';
+
+    return `<tr>
+      <td style="color:var(--accent);font-weight:700">#${r.account_id}</td>
+      <td style="color:var(--muted)">${r.email || '—'}</td>
+      <td><span class="badge ${badgeClass}">${badgeText}</span></td>
+      <td>${expDate}</td>
+      <td><span class="days-num ${dlClass}">${dlText}</span></td>
+      <td>
+        <div class="actions">
+          ${r.status !== 'active'
+            ? `<button class="btn-icon activate" title="Activează" onclick="activateLicense('${r.account_id}')">✓</button>`
+            : `<button class="btn-icon suspend"  title="Suspendă"  onclick="suspendLicense('${r.account_id}')">⏸</button>`
+          }
+          <button class="btn-icon delete" title="Șterge" onclick="deleteLicense('${r.account_id}')">✕</button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('tableWrap').innerHTML = `
+    <table>
+      <thead><tr>
+        <th>Cont</th><th>Email</th><th>Status</th><th>Expiră</th><th>Zile</th><th>Acțiuni</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function filterTable() {
+  const q = document.getElementById('searchInput').value.toLowerCase();
+  const filtered = allLicenses.filter(r =>
+    r.account_id.toLowerCase().includes(q) ||
+    (r.email || '').toLowerCase().includes(q) ||
+    (r.notes || '').toLowerCase().includes(q)
+  );
+  renderTable(filtered);
+}
+
+async function addLicense() {
+  const account = document.getElementById('fAccount').value.trim();
+  if (!account) { toast('Introdu numărul de cont!', 'error'); return; }
+  try {
+    const res = await apiFetch('/admin/license', 'POST', {
+      account_id: account,
+      email:  document.getElementById('fEmail').value.trim(),
+      months: parseInt(document.getElementById('fMonths').value),
+      plan:   document.getElementById('fPlan').value,
+      notes:  document.getElementById('fNotes').value.trim(),
+    });
+    toast(`✅ Licență adăugată! Expiră: ${res.expires_at}`, 'success');
+    document.getElementById('fAccount').value = '';
+    document.getElementById('fEmail').value   = '';
+    document.getElementById('fNotes').value   = '';
+    await loadAll();
+  } catch(e) { toast('❌ Eroare: ' + e.message, 'error'); }
+}
+
+async function suspendLicense(id) {
+  if (!confirm(`Suspendă licența pentru contul #${id}?`)) return;
+  try {
+    await apiFetch(`/admin/license/${id}/suspend`, 'PATCH');
+    toast(`⏸ Cont #${id} suspendat`, 'success');
+    await loadAll();
+  } catch(e) { toast('❌ ' + e.message, 'error'); }
+}
+
+async function activateLicense(id) {
+  try {
+    await apiFetch(`/admin/license/${id}/activate`, 'PATCH');
+    toast(`✅ Cont #${id} reactivat`, 'success');
+    await loadAll();
+  } catch(e) { toast('❌ ' + e.message, 'error'); }
+}
+
+async function deleteLicense(id) {
+  if (!confirm(`Șterge definitiv licența pentru contul #${id}?`)) return;
+  try {
+    await apiFetch(`/admin/license/${id}`, 'DELETE');
+    toast(`🗑 Licență #${id} ștearsă`, 'success');
+    await loadAll();
+  } catch(e) { toast('❌ ' + e.message, 'error'); }
+}
+
+let toastTimer;
+function toast(msg, type = 'success') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = `show ${type}`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.className = '', 3000);
+}
+</script>
+</body>
+</html>
