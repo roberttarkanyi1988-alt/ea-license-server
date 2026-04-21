@@ -353,7 +353,20 @@ const API = '';  // Dacă servești admin de pe același server, lasă gol. Altf
 
 let allLicenses = [];
 
-function key() { return document.getElementById('adminKey').value.trim(); }
+function key() {
+  const k = document.getElementById('adminKey').value.trim();
+  if(k) localStorage.setItem('ea_admin_key', k);
+  return k;
+}
+
+// Auto-load saved key
+window.addEventListener('DOMContentLoaded', () => {
+  const saved = localStorage.getItem('ea_admin_key');
+  if(saved) {
+    document.getElementById('adminKey').value = saved;
+    loadAll();
+  }
+});
 
 async function apiFetch(path, method = 'GET', body = null) {
   const opts = {
