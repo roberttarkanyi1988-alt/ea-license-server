@@ -147,7 +147,7 @@ app.post('/api/create-payment', adminAuth, async (req, res) => {
   try {
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
-      mode: 'payment',
+      mode: 'subscription',
       customer_email: email || undefined,
       line_items: [{
         price: process.env.STRIPE_PRICE_ID,
@@ -266,7 +266,7 @@ app.post('/admin/payment-link', adminAuth, async (req, res) => {
   try {
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
-      mode: 'payment',
+      mode: 'subscription',
       customer_email: email || undefined,
       line_items: [{ price: process.env.STRIPE_PRICE_ID, quantity: parseInt(months) }],
       metadata: { account_id, months: String(months), email: email || '' },
