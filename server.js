@@ -47,6 +47,79 @@ async function initDB() {
 
 initDB().catch(console.error);
 
+// ─── Email cu Resend ──────────────────────────────────────────────────────────
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const ADMIN_EMAIL    = process.env.ADMIN_EMAIL || 'robert.tarkanyi1988@gmail.com';
+
+async function sendEmail(to, subject, html) {
+  if (!RESEND_API_KEY) return;
+  try {
+    await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${RESEND_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        from: 'EA License <onboarding@resend.dev>',
+        to: [to],
+        subject,
+        html
+      })
+    });
+  } catch(e) {
+    console.error('Email error:', e.message);
+  }
+}
+
+// Verificare zilnică a licențelor care expiră
+async function checkExpiringLicenses() {
+  try {
+    const result = await pool.query(`
+      SELECT * FROM licenses 
+      WHERE status = 'active' 
+      AND expires_at::date - CURRENT_DATE IN (7, 3, 1)
+    `);
+    
+    for (const row of result.rows) {
+      const daysLeft = Math.ceil((new Date(row.expires_at) - new Date()) / 86400000);
+      
+      // Email către admin
+      await sendEmail(
+        ADMIN_EMAIL,
+        `⚠️ Abonament expiră în ${daysLeft} zile - Cont #${row.account_id}`,
+        `<h2>Abonament care expiră curând</h2>
+         <p><b>Cont MT5:</b> #${row.account_id}</p>
+         <p><b>Email client:</b> ${row.email || 'nespecificat'}</p>
+         <p><b>Expiră:</b> ${row.expires_at}</p>
+         <p><b>Zile rămase:</b> ${daysLeft}</p>
+         <p>Accesează panelul admin pentru a reînnoi abonamentul.</p>`
+      );
+
+      // Email către client dacă are email
+      if (row.email) {
+        await sendEmail(
+          row.email,
+          `⚠️ Abonamentul tău EA expiră în ${daysLeft} zile`,
+          `<h2>Abonamentul tău expiră curând!</h2>
+           <p>Abonamentul pentru contul MT5 <b>#${row.account_id}</b> expiră pe <b>${row.expires_at}</b> (în ${daysLeft} zile).</p>
+           <p>Contactează furnizorul pentru a reînnoi abonamentul și a continua trading-ul.</p>`
+        );
+      }
+    }
+  } catch(e) {
+    console.error('Expiry check error:', e.message);
+  }
+}
+
+// Rulează verificarea zilnic la ora 09:00
+setInterval(() => {
+  const now = new Date();
+  if (now.getHours() === 9 && now.getMinutes() === 0) {
+    checkExpiringLicenses();
+  }
+}, 60000); // verifică în fiecare minut
+
 // ─── Rate Limiting ────────────────────────────────────────────────────────────
 const limiter = rateLimit({
   windowMs: 60 * 1000,
@@ -126,6 +199,27 @@ app.post('/admin/license', adminAuth, async (req, res) => {
       status='active', expires_at=excluded.expires_at, notes=excluded.notes
   `, [account_id, email, plan, expiresAt, notes]);
 
+  // Email confirmare către client
+  if (email) {
+    await sendEmail(
+      email,
+      '✅ Abonament activat - EA License',
+      `<h2>Abonamentul tău a fost activat!</h2>
+       <p>Contul MT5 <b>#${account_id}</b> are abonament activ până pe <b>${expiresAt}</b>.</p>
+       <p>Mulțumim pentru încredere!</p>`
+    );
+  }
+
+  // Email notificare către admin
+  await sendEmail(
+    ADMIN_EMAIL,
+    `✅ Licență nouă adăugată - Cont #${account_id}`,
+    `<h2>Licență nouă activată</h2>
+     <p><b>Cont:</b> #${account_id}</p>
+     <p><b>Email:</b> ${email || 'nespecificat'}</p>
+     <p><b>Expiră:</b> ${expiresAt}</p>`
+  );
+
   res.json({ success: true, account_id, expires_at: expiresAt, months_added: months });
 });
 
@@ -134,6 +228,19 @@ app.patch('/admin/license/:account_id/suspend', adminAuth, async (req, res) => {
   const { account_id } = req.params;
   const r = await pool.query("UPDATE licenses SET status='suspended' WHERE account_id=$1", [account_id]);
   if (r.rowCount === 0) return res.status(404).json({ error: 'Not found' });
+
+  // Găsește emailul clientului
+  const row = await pool.query('SELECT email FROM licenses WHERE account_id=$1', [account_id]);
+  if (row.rows[0]?.email) {
+    await sendEmail(
+      row.rows[0].email,
+      '⏸ Abonamentul tău a fost suspendat',
+      `<h2>Abonament suspendat</h2>
+       <p>Abonamentul pentru contul MT5 <b>#${account_id}</b> a fost suspendat.</p>
+       <p>Contactează furnizorul pentru reactivare.</p>`
+    );
+  }
+
   res.json({ success: true, account_id, status: 'suspended' });
 });
 
