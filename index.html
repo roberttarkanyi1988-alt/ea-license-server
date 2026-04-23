@@ -472,6 +472,20 @@ async function generatePaymentLink() {
     }
   } catch(e) { toast('❌ ' + e.message, 'error'); }
 }
+
+async function generatePaymentLink() {
+  const account = document.getElementById('fAccount').value.trim();
+  const email   = document.getElementById('fEmail').value.trim();
+  const months  = document.getElementById('fMonths').value;
+  if (!account) { toast('Introdu numărul de cont!', 'error'); return; }
+  try {
+    const res = await apiFetch('/admin/payment-link', 'POST', { account_id: account, email, months });
+    if (res.url) {
+      navigator.clipboard.writeText(res.url);
+      toast('✅ Link copiat! Trimite-l clientului.', 'success');
+    }
+  } catch(e) { toast('❌ ' + e.message, 'error'); }
+}
 async function addLicense() {
   const account = document.getElementById('fAccount').value.trim();
   if (!account) { toast('Introdu numărul de cont!', 'error'); return; }
