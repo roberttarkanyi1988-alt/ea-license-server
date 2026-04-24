@@ -539,6 +539,48 @@ function toast(msg, type = 'success') {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.className = '', 3000);
 }
+  async function showRevenue() {
+  if (!allLicenses.length) { toast('Nu există date!', 'error'); return; }
+  
+  const months = {};
+  let totalRevenue = 0;
+  const pricePerMonth = 100; // €
+  
+  allLicenses.forEach(r => {
+    const d = new Date(r.created_at || r.expires_at);
+    const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    months[key] = (months[key] || 0) + 1;
+    totalRevenue += pricePerMonth;
+  });
+  
+  const sorted = Object.keys(months).sort();
+  const labels = sorted.map(k => { const [y,m] = k.split('-'); return `${m}/${y}`; });
+  const values = sorted.map(k => months[k] * pricePerMonth);
+  const maxVal = Math.max(...values);
+  
+  const modal = document.createElement('div');
+  modal.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9999;display:flex;align-items:center;justify-content:center;`;
+  modal.innerHTML = `
+    <div style="background:#161a22;border:1px solid #1e2330;border-radius:16px;padding:32px;width:600px;max-width:95vw;position:relative;">
+      <button onclick="this.closest('div').parentElement.remove()" style="position:absolute;top:16px;right:16px;background:none;border:none;color:#5a6070;font-size:20px;cursor:pointer;">✕</button>
+      <h2 style="font-family:'Syne',sans-serif;color:#e8eaf0;margin-bottom:8px;">💰 Venituri</h2>
+      <p style="color:#00e5a0;font-family:monospace;font-size:24px;font-weight:800;margin-bottom:24px;">Total: ${totalRevenue}€</p>
+      <div style="background:#0a0c0f;border-radius:10px;padding:16px;">
+        <div style="font-size:11px;color:#5a6070;text-transform:uppercase;letter-spacing:.1em;margin-bottom:12px;">Venituri pe lună (€)</div>
+        <div style="display:flex;align-items:flex-end;gap:8px;height:120px;">
+          ${values.map((v,i) => `
+            <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;">
+              <div style="font-size:10px;color:#0066ff;font-family:monospace;">${v}€</div>
+              <div style="width:100%;background:#0066ff;border-radius:4px 4px 0 0;height:${Math.round((v/maxVal)*100)}px;"></div>
+              <div style="font-size:9px;color:#5a6070;">${labels[i]}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+}
  // ─── Statistici ───────────────────────────────────────────────────
 function showStats() {
   if (!allLicenses.length) { toast('Nu există date!', 'error'); return; }
