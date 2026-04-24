@@ -481,8 +481,8 @@ async function generatePaymentLink() {
   try {
     const res = await apiFetch('/admin/payment-link', 'POST', { account_id: account, email, months });
     if (res.url) {
-      navigator.clipboard.writeText(res.url);
-      toast('✅ Link copiat! Trimite-l clientului.', 'success');
+     window.open(res.url, '_blank');
+toast('✅ Link plată deschis în tab nou!', 'success');
     }
   } catch(e) { toast('❌ ' + e.message, 'error'); }
 }
