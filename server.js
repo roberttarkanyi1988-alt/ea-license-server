@@ -220,6 +220,50 @@ app.get('/payment-cancel', (req, res) => {
     <p>Plata a fost anulată. Contactează furnizorul pentru asistență.</p>
   </body></html>`);
 });
+// ─── Pagină publică verificare abonament ─────────────────────────────────────
+app.get('/check-status', async (req, res) => {
+  const { account } = req.query;
+  
+  if (!account) {
+    return res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:50px;background:#0a0c0f;color:#e8eaf0;">
+      <h2>Verifică abonamentul tău</h2>
+      <form method="GET" action="/check-status">
+        <input name="account" placeholder="Număr cont MT5" style="padding:10px;font-size:16px;border-radius:8px;border:1px solid #1e2330;background:#161a22;color:#e8eaf0;width:250px;">
+        <br><br>
+        <button type="submit" style="padding:12px 24px;background:#00e5a0;color:#000;border:none;border-radius:8px;font-size:16px;font-weight:800;cursor:pointer;">Verifică</button>
+      </form>
+    </body></html>`);
+  }
+
+  const result = await pool.query('SELECT * FROM licenses WHERE account_id=$1', [account]);
+  const row = result.rows[0];
+
+  if (!row) {
+    return res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:50px;background:#0a0c0f;color:#e8eaf0;">
+      <h1 style="color:#ff3d5a;">❌ Cont negăsit</h1>
+      <p>Contul #${account} nu are licență activă.</p>
+      <a href="/check-status" style="color:#00e5a0;">Încearcă din nou</a>
+    </body></html>`);
+  }
+
+  const now = new Date();
+  const expiry = new Date(row.expires_at);
+  const daysLeft = Math.ceil((expiry - now) / 86400000);
+  const statusColor = row.status === 'active' ? '#00e5a0' : '#ff3d5a';
+  const statusText = row.status === 'active' ? '✅ Activ' : row.status === 'suspended' ? '⏸ Suspendat' : '❌ Expirat';
+
+  res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:50px;background:#0a0c0f;color:#e8eaf0;">
+    <h1 style="color:${statusColor};">${statusText}</h1>
+    <div style="background:#161a22;border:1px solid #1e2330;border-radius:16px;padding:32px;max-width:400px;margin:0 auto;">
+      <p><b>Cont MT5:</b> #${row.account_id}</p>
+      <p><b>Status:</b> <span style="color:${statusColor};">${statusText}</span></p>
+      <p><b>Expiră:</b> ${row.expires_at}</p>
+      ${row.status === 'active' ? `<p><b>Zile rămase:</b> <span style="color:#00e5a0;font-size:24px;font-weight:800;">${daysLeft}</span></p>` : ''}
+    </div>
+    <br>
+    <a href="/check-status" style="color:#00e5a0;">Verifică alt cont</a>
+  </body></html>`);
+});
 
 // ─── ADMIN: Adaugă / reînnoiește licență ─────────────────────────────────────
 app.post('/admin/license', adminAuth, async (req, res) => {
