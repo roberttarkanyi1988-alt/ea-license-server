@@ -183,7 +183,7 @@ app.post('/webhook', async (req, res) => {
 
     // Activează licența automat
     const base = new Date();
-    base.setMonth(base.getMonth() + parseInt(months));
+    base.setDate(base.getDate() + (parseInt(months) * 30));
     const expiresAt = base.toISOString().split('T')[0];
 
     await pool.query(`
@@ -232,11 +232,11 @@ app.post('/admin/license', adminAuth, async (req, res) => {
   let expiresAt;
   if (row && row.status === 'active') {
     const base = new Date(row.expires_at);
-    base.setMonth(base.getMonth() + parseInt(months));
+    base.setDate(base.getDate() + (parseInt(months) * 30));
     expiresAt = base.toISOString().split('T')[0];
   } else {
     const base = new Date();
-    base.setMonth(base.getMonth() + parseInt(months));
+    base.setDate(base.getDate() + (parseInt(months) * 30));
     expiresAt = base.toISOString().split('T')[0];
   }
 
