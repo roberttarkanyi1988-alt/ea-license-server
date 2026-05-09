@@ -34,7 +34,7 @@ body {
 }
 
 /* Grid background */
-body::before {
+body::before { display: none; /*
   content:'';
   position:fixed; inset:0;
   background-image:
@@ -108,7 +108,7 @@ body::before {
   display: flex; flex-direction: column;
   align-items: center; justify-content: center;
   text-align: center;
-  padding: 120px 24px 80px;
+  padding: 80px 24px 40px;
 }
 .hero-badge {
   display: inline-flex; align-items: center; gap: 8px;
@@ -486,10 +486,7 @@ footer a { color: var(--accent); text-decoration: none; }
 
 <!-- HERO -->
 <div class="hero">
-  <div class="hero-badge">
-    <div class="hero-badge-dot"></div>
-    <span data-t="hero-badge">Demo mode activ — Stripe test</span>
-  </div>
+
   <h1 class="hero-title">
     <span data-t="hero-title1">Trading automatizat</span><br>
     <span class="accent" data-t="hero-title2">la nivel profesional</span>
