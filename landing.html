@@ -8,329 +8,183 @@
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg:      #0a0c0f;
-  --surface: #111318;
-  --card:    #161a22;
-  --border:  #1e2330;
-  --accent:  #00e5a0;
-  --accent2: #0066ff;
-  --danger:  #ff3d5a;
-  --warn:    #ffb800;
-  --text:    #e8eaf0;
-  --muted:   #5a6070;
-  --mono:    'JetBrains Mono', monospace;
-  --sans:    'Syne', sans-serif;
+  --bg:#0a0c0f; --surface:#111318; --card:#161a22; --border:#1e2330;
+  --accent:#00e5a0; --accent2:#0066ff; --danger:#ff3d5a; --warn:#ffb800;
+  --text:#e8eaf0; --muted:#5a6070;
+  --mono:'JetBrains Mono',monospace; --sans:'Syne',sans-serif;
 }
-* { margin:0; padding:0; box-sizing:border-box; }
-html { scroll-behavior:smooth; }
-body { background:var(--bg); color:var(--text); font-family:var(--sans); overflow-x:hidden; }
+*{margin:0;padding:0;box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);overflow-x:hidden;}
 
-/* NAVBAR */
-nav {
-  position:fixed; top:0; left:0; right:0; z-index:200;
-  background:rgba(10,12,15,0.96);
-  backdrop-filter:blur(12px);
+/* NAV */
+nav{
+  position:fixed;top:0;left:0;right:0;z-index:200;
+  background:rgba(10,12,15,0.96);backdrop-filter:blur(12px);
   border-bottom:1px solid var(--border);
-  padding:0 32px;
-  display:flex; align-items:center; justify-content:space-between;
-  height:56px;
+  padding:0 40px;display:flex;align-items:center;justify-content:space-between;height:58px;
 }
-.logo {
-  font-size:14px; font-weight:800; letter-spacing:0.1em;
-  text-transform:uppercase; color:var(--text);
-  display:flex; align-items:center; gap:10px;
-}
-.logo-dot {
-  width:8px; height:8px; border-radius:50%;
-  background:var(--accent); box-shadow:0 0 10px var(--accent);
-  animation:pulse 2s infinite;
-}
-@keyframes pulse { 0%,100%{opacity:1;transform:scale(1);} 50%{opacity:0.5;transform:scale(0.8);} }
-.nav-center { display:flex; gap:28px; }
-.nav-link {
-  font-size:12px; font-weight:600; letter-spacing:0.06em;
-  text-transform:uppercase; color:var(--muted);
-  text-decoration:none; transition:color .2s;
-}
-.nav-link:hover { color:var(--accent); }
-.nav-right { display:flex; align-items:center; gap:10px; }
-.lang-btn {
-  padding:4px 12px; border-radius:20px;
-  border:1px solid var(--border);
-  font-size:11px; font-weight:700; letter-spacing:0.06em;
-  cursor:pointer; font-family:var(--sans);
-  background:transparent; color:var(--muted); transition:all .2s;
-}
-.lang-btn:hover { border-color:var(--accent); color:var(--accent); }
-.lang-btn.active { background:var(--accent); color:#000; border-color:var(--accent); }
-.btn-login {
-  padding:7px 18px;
-  background:var(--accent); color:#000;
-  border:none; border-radius:6px;
-  font-size:12px; font-weight:800; letter-spacing:0.06em; text-transform:uppercase;
-  cursor:pointer; font-family:var(--sans); text-decoration:none;
-  transition:all .2s;
-}
-.btn-login:hover { background:#00ffb3; }
+.logo{font-size:14px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--text);display:flex;align-items:center;gap:10px;}
+.logo-dot{width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent);animation:pulse 2s infinite;}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.5;transform:scale(.8);}}
+.nav-c{display:flex;gap:28px;}
+.nav-link{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);text-decoration:none;transition:color .2s;}
+.nav-link:hover{color:var(--accent);}
+.nav-r{display:flex;align-items:center;gap:8px;}
+.lang-btn{padding:4px 12px;border-radius:20px;border:1px solid var(--border);font-size:11px;font-weight:700;letter-spacing:.06em;cursor:pointer;font-family:var(--sans);background:transparent;color:var(--muted);transition:all .2s;}
+.lang-btn:hover{border-color:var(--accent);color:var(--accent);}
+.lang-btn.active{background:var(--accent);color:#000;border-color:var(--accent);}
+.btn-login{padding:8px 20px;background:var(--accent);color:#000;border:none;border-radius:6px;font-size:12px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;font-family:var(--sans);text-decoration:none;transition:all .2s;}
+.btn-login:hover{background:#00ffb3;}
 
 /* HERO */
-.hero {
-  min-height:100vh;
-  display:flex; flex-direction:column;
-  align-items:center; justify-content:center;
-  text-align:center;
-  padding:56px 24px 60px;
+.hero{
+  min-height:100vh;display:flex;flex-direction:column;
+  align-items:center;justify-content:flex-start;
+  text-align:center;padding:100px 24px 60px;
 }
-.hero-title {
-  font-size:clamp(38px,6vw,74px);
-  font-weight:800; line-height:1.05;
-  letter-spacing:-0.02em; margin-bottom:20px;
+.hero-title{
+  font-size:clamp(42px,6.5vw,82px);
+  font-weight:800;line-height:1.0;letter-spacing:-.02em;margin-bottom:22px;
 }
-.hero-title .accent { color:var(--accent); }
-.hero-sub {
-  font-size:clamp(14px,2vw,17px);
-  color:var(--muted); max-width:500px;
-  line-height:1.6; margin-bottom:36px;
-}
-.hero-actions { display:flex; gap:12px; justify-content:center; flex-wrap:wrap; }
-.btn-primary {
-  padding:13px 30px;
-  background:var(--accent); color:#000;
-  border:none; border-radius:8px;
-  font-family:var(--sans); font-size:14px; font-weight:800;
-  letter-spacing:0.06em; text-transform:uppercase;
-  cursor:pointer; text-decoration:none; transition:all .2s;
-}
-.btn-primary:hover { background:#00ffb3; transform:translateY(-2px); box-shadow:0 8px 30px rgba(0,229,160,0.25); }
-.btn-secondary {
-  padding:13px 30px;
-  background:transparent; color:var(--text);
-  border:1px solid var(--border); border-radius:8px;
-  font-family:var(--sans); font-size:14px; font-weight:600;
-  cursor:pointer; text-decoration:none; transition:all .2s;
-}
-.btn-secondary:hover { border-color:var(--accent); color:var(--accent); }
+.hero-title .accent{color:var(--accent);}
+.hero-sub{font-size:clamp(14px,1.8vw,17px);color:var(--muted);max-width:480px;line-height:1.65;margin-bottom:38px;}
+.hero-actions{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;}
+.btn-primary{padding:14px 32px;background:var(--accent);color:#000;border:none;border-radius:8px;font-family:var(--sans);font-size:14px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;text-decoration:none;transition:all .2s;}
+.btn-primary:hover{background:#00ffb3;transform:translateY(-2px);box-shadow:0 8px 30px rgba(0,229,160,.25);}
+.btn-secondary{padding:14px 32px;background:transparent;color:var(--text);border:1px solid var(--border);border-radius:8px;font-family:var(--sans);font-size:14px;font-weight:600;cursor:pointer;text-decoration:none;transition:all .2s;}
+.btn-secondary:hover{border-color:var(--accent);color:var(--accent);}
 
 /* STATS */
-.stats-strip {
-  display:flex; justify-content:center;
-  border-top:1px solid var(--border);
-  border-bottom:1px solid var(--border);
-  background:var(--surface);
-}
-.stat-item {
-  flex:1; max-width:220px;
-  padding:22px 32px; text-align:center;
-  border-right:1px solid var(--border);
-}
-.stat-item:last-child { border-right:none; }
-.stat-num {
-  font-family:var(--mono); font-size:26px; font-weight:700;
-  color:var(--accent); display:block; margin-bottom:4px;
-}
-.stat-lbl { font-size:11px; color:var(--muted); letter-spacing:0.08em; text-transform:uppercase; }
+.stats-strip{display:flex;justify-content:center;border-top:1px solid var(--border);border-bottom:1px solid var(--border);background:var(--surface);}
+.stat-item{flex:1;max-width:220px;padding:24px 32px;text-align:center;border-right:1px solid var(--border);}
+.stat-item:last-child{border-right:none;}
+.stat-num{font-family:var(--mono);font-size:28px;font-weight:700;color:var(--accent);display:block;margin-bottom:5px;}
+.stat-lbl{font-size:11px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;}
 
-/* SECTIONS */
-.section { max-width:1100px; margin:0 auto; padding:72px 24px; }
-.section-tag {
-  font-family:var(--mono); font-size:11px; color:var(--accent);
-  letter-spacing:0.12em; text-transform:uppercase;
-  display:block; margin-bottom:10px;
-}
-.section-title { font-size:clamp(24px,4vw,38px); font-weight:800; line-height:1.1; margin-bottom:14px; }
-.section-sub { font-size:14px; color:var(--muted); max-width:500px; line-height:1.6; }
+/* SECTION */
+.section{max-width:1100px;margin:0 auto;padding:80px 24px;}
+.section-tag{font-family:var(--mono);font-size:11px;color:var(--accent);letter-spacing:.12em;text-transform:uppercase;display:block;margin-bottom:12px;}
+.section-title{font-size:clamp(30px,4.5vw,52px);font-weight:800;line-height:1.05;letter-spacing:-.02em;margin-bottom:16px;}
+.section-sub{font-size:15px;color:var(--muted);max-width:520px;line-height:1.65;}
 
 /* EA GRID */
-.ea-grid {
-  display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(280px,1fr));
-  gap:16px; margin-top:44px;
-}
-.ea-card {
-  background:var(--card); border:1px solid var(--border);
-  border-radius:12px; padding:24px;
-  transition:border-color .2s, transform .2s;
-  position:relative; overflow:hidden;
-}
-.ea-card::before {
-  content:''; position:absolute; top:0; left:0; right:0; height:2px;
-  background:var(--accent);
-  transform:scaleX(0); transform-origin:left; transition:transform .3s;
-}
-.ea-card:hover { border-color:rgba(0,229,160,0.3); transform:translateY(-3px); }
-.ea-card:hover::before { transform:scaleX(1); }
-.ea-num { font-family:var(--mono); font-size:11px; color:var(--muted); margin-bottom:8px; display:block; }
-.ea-name { font-size:16px; font-weight:700; margin-bottom:5px; }
-.ea-symbol { font-family:var(--mono); font-size:12px; color:var(--accent2); margin-bottom:10px; display:block; }
-.ea-desc { font-size:13px; color:var(--muted); line-height:1.5; }
-.ea-status {
-  display:inline-flex; align-items:center; gap:5px;
-  margin-top:12px; padding:3px 10px;
-  background:rgba(0,229,160,0.08); border-radius:4px;
-  font-size:10px; font-weight:700; letter-spacing:0.08em;
-  text-transform:uppercase; color:var(--accent);
-}
-.ea-status::before {
-  content:''; width:5px; height:5px; border-radius:50%;
-  background:var(--accent); box-shadow:0 0 6px var(--accent);
-}
+.ea-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-top:48px;}
+.ea-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:26px;transition:border-color .2s,transform .2s;position:relative;overflow:hidden;}
+.ea-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--accent);transform:scaleX(0);transform-origin:left;transition:transform .3s;}
+.ea-card:hover{border-color:rgba(0,229,160,.3);transform:translateY(-3px);}
+.ea-card:hover::before{transform:scaleX(1);}
+.ea-num{font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:10px;display:block;}
+.ea-name{font-size:17px;font-weight:700;margin-bottom:6px;}
+.ea-symbol{font-family:var(--mono);font-size:12px;color:var(--accent2);margin-bottom:12px;display:block;}
+.ea-desc{font-size:13px;color:var(--muted);line-height:1.55;}
+.ea-status{display:inline-flex;align-items:center;gap:5px;margin-top:14px;padding:3px 10px;background:rgba(0,229,160,.08);border-radius:4px;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);}
+.ea-status::before{content:'';width:5px;height:5px;border-radius:50%;background:var(--accent);box-shadow:0 0 6px var(--accent);}
 
 /* PRICING */
-.pricing-bg { background:var(--surface); }
-.pricing-grid {
-  display:grid;
-  grid-template-columns:repeat(auto-fit,minmax(290px,1fr));
-  gap:20px; margin-top:44px;
-}
-.plan-card {
-  background:var(--card); border:1px solid var(--border);
-  border-radius:14px; padding:30px;
-  position:relative; transition:transform .2s;
-}
-.plan-card:hover { transform:translateY(-4px); }
-.plan-card.featured { border-color:var(--accent); box-shadow:0 0 40px rgba(0,229,160,0.07); }
-.plan-badge {
-  position:absolute; top:-11px; left:50%; transform:translateX(-50%);
-  background:var(--accent); color:#000;
-  font-size:10px; font-weight:800; letter-spacing:0.1em; text-transform:uppercase;
-  padding:3px 14px; border-radius:20px; white-space:nowrap;
-}
-.plan-name { font-size:11px; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:var(--muted); margin-bottom:8px; }
-.plan-price { font-family:var(--mono); font-size:40px; font-weight:700; color:var(--text); margin-bottom:4px; line-height:1; }
-.plan-price span { font-size:15px; color:var(--muted); font-weight:400; }
-.plan-desc { font-size:13px; color:var(--muted); margin-bottom:22px; padding-bottom:22px; border-bottom:1px solid var(--border); }
-.plan-features { list-style:none; margin-bottom:26px; }
-.plan-features li {
-  font-size:13px; color:var(--muted);
-  padding:5px 0; display:flex; align-items:center; gap:10px;
-}
-.plan-features li::before { content:'✓'; color:var(--accent); font-weight:700; font-size:12px; flex-shrink:0; }
-.plan-features li.hl { color:var(--text); }
-.plan-btn {
-  width:100%; padding:13px;
-  border-radius:8px; font-family:var(--sans);
-  font-size:13px; font-weight:800;
-  letter-spacing:0.06em; text-transform:uppercase;
-  cursor:pointer; transition:all .2s;
-  border:1px solid var(--border); background:transparent; color:var(--text);
-}
-.plan-btn:hover { border-color:var(--accent); color:var(--accent); }
-.plan-btn.pri { background:var(--accent); color:#000; border-color:var(--accent); }
-.plan-btn.pri:hover { background:#00ffb3; box-shadow:0 4px 20px rgba(0,229,160,0.3); }
-.trial-note { text-align:center; margin-top:22px; font-family:var(--mono); font-size:12px; color:var(--muted); }
-.trial-note span { color:var(--accent); font-weight:700; }
+.pricing-bg{background:var(--surface);}
+.pricing-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:20px;margin-top:48px;}
+.plan-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:32px;position:relative;transition:transform .2s;}
+.plan-card:hover{transform:translateY(-4px);}
+.plan-card.featured{border-color:var(--accent);box-shadow:0 0 50px rgba(0,229,160,.08);}
+.plan-badge{position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:var(--accent);color:#000;font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;padding:4px 16px;border-radius:20px;white-space:nowrap;}
+.plan-name{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;}
+.plan-price{font-family:var(--mono);font-size:44px;font-weight:700;color:var(--text);margin-bottom:4px;line-height:1;}
+.plan-price span{font-size:15px;color:var(--muted);font-weight:400;}
+.plan-accounts{display:inline-block;font-family:var(--mono);font-size:11px;color:var(--accent2);background:rgba(0,102,255,.08);padding:3px 10px;border-radius:4px;margin-bottom:16px;}
+.plan-desc{font-size:13px;color:var(--muted);margin-bottom:22px;padding-bottom:22px;border-bottom:1px solid var(--border);}
+.plan-features{list-style:none;margin-bottom:28px;}
+.plan-features li{font-size:13px;color:var(--muted);padding:6px 0;display:flex;align-items:center;gap:10px;}
+.plan-features li::before{content:'✓';color:var(--accent);font-weight:700;font-size:12px;flex-shrink:0;}
+.plan-features li.hl{color:var(--text);font-weight:600;}
+.plan-btn{width:100%;padding:14px;border-radius:8px;font-family:var(--sans);font-size:13px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;transition:all .2s;border:1px solid var(--border);background:transparent;color:var(--text);}
+.plan-btn:hover{border-color:var(--accent);color:var(--accent);}
+.plan-btn.pri{background:var(--accent);color:#000;border-color:var(--accent);}
+.plan-btn.pri:hover{background:#00ffb3;box-shadow:0 4px 20px rgba(0,229,160,.3);}
+.trial-note{text-align:center;margin-top:24px;font-family:var(--mono);font-size:12px;color:var(--muted);}
+.trial-note span{color:var(--accent);}
 
 /* COUPON */
-.coupon-wrap {
-  max-width:420px; margin:28px auto 0;
-  background:var(--card); border:1px solid var(--border);
-  border-radius:12px; padding:22px;
-}
-.coupon-label { font-size:11px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:var(--muted); margin-bottom:10px; display:block; }
-.coupon-row { display:flex; gap:8px; }
-.coupon-input {
-  flex:1; padding:9px 12px;
-  background:var(--surface); border:1px solid var(--border);
-  border-radius:6px; color:var(--text);
-  font-family:var(--mono); font-size:13px;
-  outline:none; transition:border-color .2s; text-transform:uppercase;
-}
-.coupon-input:focus { border-color:var(--accent); }
-.coupon-btn {
-  padding:9px 18px; background:var(--surface); color:var(--text);
-  border:1px solid var(--border); border-radius:6px;
-  font-family:var(--sans); font-size:12px; font-weight:700;
-  cursor:pointer; transition:all .2s;
-}
-.coupon-btn:hover { border-color:var(--accent); color:var(--accent); }
-.coupon-msg { font-family:var(--mono); font-size:12px; margin-top:8px; display:none; }
-.coupon-ok { color:var(--accent); }
-.coupon-err { color:var(--danger); }
+.coupon-wrap{max-width:440px;margin:28px auto 0;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:24px;}
+.coupon-label{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;display:block;}
+.coupon-row{display:flex;gap:8px;}
+.coupon-input{flex:1;padding:10px 13px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:13px;outline:none;transition:border-color .2s;text-transform:uppercase;}
+.coupon-input:focus{border-color:var(--accent);}
+.coupon-btn{padding:10px 18px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;font-family:var(--sans);font-size:12px;font-weight:700;cursor:pointer;transition:all .2s;}
+.coupon-btn:hover{border-color:var(--accent);color:var(--accent);}
+.coupon-msg{font-family:var(--mono);font-size:12px;margin-top:8px;display:none;}
+.c-ok{color:var(--accent);} .c-err{color:var(--danger);}
 
 /* STEPS */
-.steps { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:20px; margin-top:44px; }
-.step-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:26px 22px; }
-.step-num { font-family:var(--mono); font-size:11px; color:var(--accent); font-weight:700; letter-spacing:0.1em; display:block; margin-bottom:10px; }
-.step-title { font-size:15px; font-weight:700; margin-bottom:8px; }
-.step-desc { font-size:13px; color:var(--muted); line-height:1.5; }
+.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:20px;margin-top:48px;}
+.step-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:28px 24px;}
+.step-num{font-family:var(--mono);font-size:11px;color:var(--accent);font-weight:700;letter-spacing:.1em;display:block;margin-bottom:12px;}
+.step-title{font-size:17px;font-weight:700;margin-bottom:10px;letter-spacing:-.01em;}
+.step-desc{font-size:13px;color:var(--muted);line-height:1.6;}
+.vps-note{
+  margin-top:36px;
+  background:rgba(0,229,160,.05);
+  border:1px solid rgba(0,229,160,.2);
+  border-radius:12px;padding:22px 28px;
+  display:flex;align-items:flex-start;gap:16px;
+}
+.vps-note-icon{font-size:22px;flex-shrink:0;margin-top:2px;}
+.vps-note-title{font-size:15px;font-weight:700;color:var(--accent);margin-bottom:6px;}
+.vps-note-desc{font-size:13px;color:var(--muted);line-height:1.6;}
+.vps-note-link{color:var(--accent);text-decoration:none;font-weight:700;border-bottom:1px solid rgba(0,229,160,.3);}
+.vps-note-link:hover{border-color:var(--accent);}
 
 /* TESTIMONIALS */
-.testimonials { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:16px; margin-top:44px; }
-.testi-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:22px; }
-.testi-text { font-size:14px; color:var(--text); line-height:1.6; margin-bottom:14px; font-style:italic; }
-.testi-author { font-size:12px; color:var(--muted); font-family:var(--mono); }
-.testi-plan { color:var(--accent); }
+.testimonials{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin-top:48px;}
+.testi-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:24px;}
+.testi-text{font-size:14px;color:var(--text);line-height:1.65;margin-bottom:16px;font-style:italic;}
+.testi-author{font-size:12px;color:var(--muted);font-family:var(--mono);}
+.testi-plan{color:var(--accent);}
 
 /* CTA */
-.cta-section { text-align:center; padding:90px 24px; }
+.cta-section{text-align:center;padding:90px 24px;}
 
 /* FOOTER */
-footer {
-  border-top:1px solid var(--border);
-  padding:28px 24px; text-align:center;
-  font-size:12px; color:var(--muted); font-family:var(--mono);
-}
-footer a { color:var(--accent); text-decoration:none; }
+footer{border-top:1px solid var(--border);padding:28px 24px;text-align:center;font-size:12px;color:var(--muted);font-family:var(--mono);}
+footer a{color:var(--accent);text-decoration:none;}
 
 /* MODAL */
-.modal-overlay {
-  display:none; position:fixed; inset:0; z-index:500;
-  background:rgba(0,0,0,0.82); backdrop-filter:blur(4px);
-  align-items:center; justify-content:center;
-}
-.modal-overlay.open { display:flex; }
-.modal {
-  background:var(--card); border:1px solid var(--border);
-  border-radius:16px; padding:38px; width:100%; max-width:390px; margin:20px;
-  position:relative;
-}
-.modal-close { position:absolute; top:14px; right:16px; background:none; border:none; color:var(--muted); font-size:20px; cursor:pointer; }
-.modal-title { font-size:20px; font-weight:800; margin-bottom:5px; }
-.modal-sub { font-size:13px; color:var(--muted); margin-bottom:26px; }
-.form-group { margin-bottom:14px; }
-.form-label { display:block; font-size:11px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:var(--muted); margin-bottom:6px; }
-.form-input {
-  width:100%; padding:10px 13px;
-  background:var(--surface); border:1px solid var(--border);
-  border-radius:6px; color:var(--text);
-  font-family:var(--mono); font-size:13px;
-  outline:none; transition:border-color .2s;
-}
-.form-input:focus { border-color:var(--accent); }
-.modal-btn {
-  width:100%; padding:13px;
-  background:var(--accent); color:#000;
-  border:none; border-radius:8px;
-  font-family:var(--sans); font-size:13px; font-weight:800;
-  letter-spacing:0.06em; text-transform:uppercase;
-  cursor:pointer; transition:all .2s; margin-top:4px;
-}
-.modal-btn:hover { background:#00ffb3; }
-.modal-switch { text-align:center; margin-top:14px; font-size:12px; color:var(--muted); }
-.modal-switch a { color:var(--accent); cursor:pointer; }
-.modal-err { font-size:12px; color:var(--danger); margin-top:8px; display:none; font-family:var(--mono); }
-.modal-ok  { font-size:12px; color:var(--accent);  margin-top:8px; display:none; font-family:var(--mono); }
+.modal-overlay{display:none;position:fixed;inset:0;z-index:500;background:rgba(0,0,0,.82);backdrop-filter:blur(4px);align-items:center;justify-content:center;}
+.modal-overlay.open{display:flex;}
+.modal{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:38px;width:100%;max-width:390px;margin:20px;position:relative;}
+.modal-close{position:absolute;top:14px;right:16px;background:none;border:none;color:var(--muted);font-size:20px;cursor:pointer;}
+.modal-title{font-size:22px;font-weight:800;margin-bottom:5px;letter-spacing:-.01em;}
+.modal-sub{font-size:13px;color:var(--muted);margin-bottom:26px;}
+.form-group{margin-bottom:14px;}
+.form-label{display:block;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;}
+.form-input{width:100%;padding:10px 13px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:13px;outline:none;transition:border-color .2s;}
+.form-input:focus{border-color:var(--accent);}
+.modal-btn{width:100%;padding:13px;background:var(--accent);color:#000;border:none;border-radius:8px;font-family:var(--sans);font-size:13px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;transition:all .2s;margin-top:4px;}
+.modal-btn:hover{background:#00ffb3;}
+.modal-switch{text-align:center;margin-top:14px;font-size:12px;color:var(--muted);}
+.modal-switch a{color:var(--accent);cursor:pointer;}
+.modal-err{font-size:12px;color:var(--danger);margin-top:8px;display:none;font-family:var(--mono);}
+.modal-ok{font-size:12px;color:var(--accent);margin-top:8px;display:none;font-family:var(--mono);}
 
-/* RESPONSIVE */
 @media(max-width:768px){
-  nav { padding:0 16px; }
-  .nav-center { display:none; }
-  .stats-strip { flex-wrap:wrap; }
-  .stat-item { border-right:none; border-bottom:1px solid var(--border); min-width:50%; }
+  nav{padding:0 16px;}
+  .nav-c{display:none;}
+  .stats-strip{flex-wrap:wrap;}
+  .stat-item{border-right:none;border-bottom:1px solid var(--border);min-width:50%;}
+  .hero{padding:80px 20px 40px;}
 }
 </style>
 </head>
 <body>
 
-<!-- NAVBAR -->
 <nav>
   <div class="logo"><div class="logo-dot"></div><span>EA Strategies</span></div>
-  <div class="nav-center">
+  <div class="nav-c">
     <a href="#ea-uri" class="nav-link" data-t="nav-eas">EA-uri</a>
     <a href="#pricing" class="nav-link" data-t="nav-pricing">Prețuri</a>
     <a href="#cum-functioneaza" class="nav-link" data-t="nav-how">Cum funcționează</a>
   </div>
-  <div class="nav-right">
+  <div class="nav-r">
     <button class="lang-btn active" onclick="setLang('ro',this)">RO</button>
     <button class="lang-btn" onclick="setLang('en',this)">EN</button>
     <button class="lang-btn" onclick="setLang('de',this)">DE</button>
@@ -338,55 +192,53 @@ footer a { color:var(--accent); text-decoration:none; }
   </div>
 </nav>
 
-<!-- HERO -->
 <div class="hero">
   <h1 class="hero-title">
-    <span data-t="hero-t1">Trading automatizat</span><br>
-    <span class="accent" data-t="hero-t2">la nivel profesional</span>
+    <span data-t="ht1">Trading automatizat</span><br>
+    <span class="accent" data-t="ht2">la nivel profesional</span>
   </h1>
-  <p class="hero-sub" data-t="hero-sub">Strategii algoritmice MT5 testate, activare instantă după plată, reînnoire automată. Fără complicații.</p>
+  <p class="hero-sub" data-t="hs">Strategii algoritmice MT5 testate, activare instantă după plată, reînnoire automată. Fără complicații.</p>
   <div class="hero-actions">
-    <a href="#pricing" class="btn-primary" data-t="hero-cta1">Vezi planurile</a>
-    <a href="#cum-functioneaza" class="btn-secondary" data-t="hero-cta2">Cum funcționează</a>
+    <a href="#pricing" class="btn-primary" data-t="hc1">Vezi planurile</a>
+    <a href="#cum-functioneaza" class="btn-secondary" data-t="hc2">Cum funcționează</a>
   </div>
 </div>
 
-<!-- STATS -->
 <div class="stats-strip">
-  <div class="stat-item"><span class="stat-num">6</span><span class="stat-lbl" data-t="stat1">Strategii active</span></div>
-  <div class="stat-item"><span class="stat-num">24/7</span><span class="stat-lbl" data-t="stat2">Rulează non-stop</span></div>
-  <div class="stat-item"><span class="stat-num">7</span><span class="stat-lbl" data-t="stat3">Zile trial gratuit</span></div>
-  <div class="stat-item"><span class="stat-num">instant</span><span class="stat-lbl" data-t="stat4">Activare după plată</span></div>
+  <div class="stat-item"><span class="stat-num">6</span><span class="stat-lbl" data-t="s1">Strategii active</span></div>
+  <div class="stat-item"><span class="stat-num">24/7</span><span class="stat-lbl" data-t="s2">Rulează non-stop</span></div>
+  <div class="stat-item"><span class="stat-num">7</span><span class="stat-lbl" data-t="s3">Zile trial gratuit</span></div>
+  <div class="stat-item"><span class="stat-num">instant</span><span class="stat-lbl" data-t="s4">Activare după plată</span></div>
 </div>
 
-<!-- EA-URI -->
 <div id="ea-uri">
   <div class="section">
     <span class="section-tag" data-t="ea-tag">Strategiile disponibile</span>
     <h2 class="section-title" data-t="ea-title">6 EA-uri testate și stabile</h2>
     <p class="section-sub" data-t="ea-sub">Fiecare strategie e optimizată pentru perechea ei specifică și rulează 24/7 pe VPS dedicat.</p>
     <div class="ea-grid">
-      <div class="ea-card"><span class="ea-num">EA-01</span><div class="ea-name" data-t="ea1n">Scalping Pro</div><span class="ea-symbol">XAUUSD · M5</span><div class="ea-desc" data-t="ea1d">Strategie de scalping pe aur, intrări precise pe mișcări rapide de preț.</div><span class="ea-status" data-t="ea-active">Activ</span></div>
-      <div class="ea-card"><span class="ea-num">EA-02</span><div class="ea-name" data-t="ea2n">Trend Follower</div><span class="ea-symbol">EURUSD · H1</span><div class="ea-desc" data-t="ea2d">Urmărește tendința principală, intrări cu confirmări multiple pe EUR/USD.</div><span class="ea-status" data-t="ea-active">Activ</span></div>
-      <div class="ea-card"><span class="ea-num">EA-03</span><div class="ea-name" data-t="ea3n">Grid Master</div><span class="ea-symbol">GBPUSD · H4</span><div class="ea-desc" data-t="ea3d">Sistem grid adaptiv pe GBP/USD, gestionare automată a pozițiilor deschise.</div><span class="ea-status" data-t="ea-active">Activ</span></div>
-      <div class="ea-card"><span class="ea-num">EA-04</span><div class="ea-name" data-t="ea4n">Breakout Hunter</div><span class="ea-symbol">NAS100 · M15</span><div class="ea-desc" data-t="ea4d">Captează breakout-uri pe indici, cu filtre de volatilitate și news guard.</div><span class="ea-status" data-t="ea-active">Activ</span></div>
-      <div class="ea-card"><span class="ea-num">EA-05</span><div class="ea-name" data-t="ea5n">Mean Reversion</div><span class="ea-symbol">EURUSD · H4</span><div class="ea-desc" data-t="ea5d">Exploatează revenirile la medie, ideal pentru piețe laterale cu volatilitate redusă.</div><span class="ea-status" data-t="ea-active">Activ</span></div>
-      <div class="ea-card"><span class="ea-num">EA-06</span><div class="ea-name" data-t="ea6n">Hedging Multi</div><span class="ea-symbol">Multi-pair · H1</span><div class="ea-desc" data-t="ea6d">Strategie de hedging pe mai multe perechi simultan, risc controlat și diversificat.</div><span class="ea-status" data-t="ea-active">Activ</span></div>
+      <div class="ea-card"><span class="ea-num">EA-01</span><div class="ea-name" data-t="e1n">Scalping Pro</div><span class="ea-symbol">XAUUSD · M5</span><div class="ea-desc" data-t="e1d">Strategie de scalping pe aur, intrări precise pe mișcări rapide de preț.</div><span class="ea-status" data-t="ea-act">Activ</span></div>
+      <div class="ea-card"><span class="ea-num">EA-02</span><div class="ea-name" data-t="e2n">Trend Follower</div><span class="ea-symbol">EURUSD · H1</span><div class="ea-desc" data-t="e2d">Urmărește tendința principală, intrări cu confirmări multiple pe EUR/USD.</div><span class="ea-status" data-t="ea-act">Activ</span></div>
+      <div class="ea-card"><span class="ea-num">EA-03</span><div class="ea-name" data-t="e3n">Grid Master</div><span class="ea-symbol">GBPUSD · H4</span><div class="ea-desc" data-t="e3d">Sistem grid adaptiv pe GBP/USD, gestionare automată a pozițiilor deschise.</div><span class="ea-status" data-t="ea-act">Activ</span></div>
+      <div class="ea-card"><span class="ea-num">EA-04</span><div class="ea-name" data-t="e4n">Breakout Hunter</div><span class="ea-symbol">NAS100 · M15</span><div class="ea-desc" data-t="e4d">Captează breakout-uri pe indici, cu filtre de volatilitate și news guard.</div><span class="ea-status" data-t="ea-act">Activ</span></div>
+      <div class="ea-card"><span class="ea-num">EA-05</span><div class="ea-name" data-t="e5n">Mean Reversion</div><span class="ea-symbol">EURUSD · H4</span><div class="ea-desc" data-t="e5d">Exploatează revenirile la medie, ideal pentru piețe laterale cu volatilitate redusă.</div><span class="ea-status" data-t="ea-act">Activ</span></div>
+      <div class="ea-card"><span class="ea-num">EA-06</span><div class="ea-name" data-t="e6n">Hedging Multi</div><span class="ea-symbol">Multi-pair · H1</span><div class="ea-desc" data-t="e6d">Strategie de hedging pe mai multe perechi simultan, risc controlat și diversificat.</div><span class="ea-status" data-t="ea-act">Activ</span></div>
     </div>
   </div>
 </div>
 
-<!-- PRICING -->
 <div id="pricing" class="pricing-bg">
   <div class="section" style="text-align:center">
-    <span class="section-tag" data-t="pricing-tag">Planuri și prețuri</span>
-    <h2 class="section-title" data-t="pricing-title">Simplu și transparent</h2>
-    <p class="section-sub" style="margin:0 auto" data-t="pricing-sub">7 zile trial gratuit la orice plan. Anulare oricând, fără penalizări.</p>
+    <span class="section-tag" data-t="p-tag">Planuri și prețuri</span>
+    <h2 class="section-title" data-t="p-title">Simplu și transparent</h2>
+    <p class="section-sub" style="margin:0 auto" data-t="p-sub">7 zile trial gratuit la orice plan. Anulare oricând, fără penalizări.</p>
     <div class="pricing-grid" style="text-align:left">
+
       <div class="plan-card">
         <div class="plan-name">Basic</div>
-        <div class="plan-price">€29<span data-t="per-mo">/lună</span></div>
-        <div class="plan-desc" data-t="basic-desc">1 EA la alegere · 1 cont MT5</div>
+        <div class="plan-price">€25<span data-t="pm">/lună</span></div>
+        <div class="plan-accounts" data-t="ba">1 cont MT5</div>
+        <div class="plan-desc" data-t="bd">1 EA la alegere · activare instantă</div>
         <ul class="plan-features">
           <li data-t="f-s1">1 strategie la alegere</li>
           <li data-t="f-a1">1 cont MT5 atașat</li>
@@ -397,14 +249,16 @@ footer a { color:var(--accent); text-decoration:none; }
         </ul>
         <button class="plan-btn" onclick="startCheckout('basic')" data-t="btn-tr">Începe trial gratuit</button>
       </div>
+
       <div class="plan-card featured">
         <div class="plan-badge" data-t="popular">Cel mai popular</div>
         <div class="plan-name">Pro</div>
-        <div class="plan-price">€59<span data-t="per-mo">/lună</span></div>
-        <div class="plan-desc" data-t="pro-desc">3 EA-uri la alegere · 1 cont MT5</div>
+        <div class="plan-price">€45<span data-t="pm">/lună</span></div>
+        <div class="plan-accounts" data-t="pa">2 conturi MT5</div>
+        <div class="plan-desc" data-t="pd">3 EA-uri la alegere · suport prioritar</div>
         <ul class="plan-features">
           <li data-t="f-s3">3 strategii la alegere</li>
-          <li data-t="f-a1">1 cont MT5 atașat</li>
+          <li data-t="f-a2">2 conturi MT5 atașate</li>
           <li data-t="f-sp">Suport prioritar</li>
           <li data-t="f-dv">Discord VIP acces</li>
           <li data-t="f-up">Update-uri incluse</li>
@@ -412,13 +266,15 @@ footer a { color:var(--accent); text-decoration:none; }
         </ul>
         <button class="plan-btn pri" onclick="startCheckout('pro')" data-t="btn-tr">Începe trial gratuit</button>
       </div>
+
       <div class="plan-card">
         <div class="plan-name">Full Access</div>
-        <div class="plan-price">€99<span data-t="per-mo">/lună</span></div>
-        <div class="plan-desc" data-t="full-desc">Toate EA-urile · 2 conturi MT5</div>
+        <div class="plan-price">€70<span data-t="pm">/lună</span></div>
+        <div class="plan-accounts" data-t="fa">3 conturi MT5</div>
+        <div class="plan-desc" data-t="fd">Toate EA-urile · suport direct 1:1</div>
         <ul class="plan-features">
           <li data-t="f-sa">Toate cele 6 strategii</li>
-          <li data-t="f-a2">2 conturi MT5 atașate</li>
+          <li data-t="f-a3">3 conturi MT5 atașate</li>
           <li data-t="f-s1x">Suport direct 1:1</li>
           <li data-t="f-dv">Discord VIP acces</li>
           <li data-t="f-ne">Strategie nouă gratis</li>
@@ -426,333 +282,309 @@ footer a { color:var(--accent); text-decoration:none; }
         </ul>
         <button class="plan-btn" onclick="startCheckout('full')" data-t="btn-tr">Începe trial gratuit</button>
       </div>
+
     </div>
-    <div class="trial-note"><span>✓</span> <span data-t="trial-note">Cardul nu e debitat în primele 7 zile · Anulare oricând din portalul tău</span></div>
+    <div class="trial-note"><span>✓</span> <span data-t="tn">Cardul nu e debitat în primele 7 zile · Anulare oricând din portalul tău</span></div>
     <div class="coupon-wrap" style="text-align:left">
-      <span class="coupon-label" data-t="coupon-lbl">Ai un cod de reducere?</span>
+      <span class="coupon-label" data-t="cl">Ai un cod de reducere?</span>
       <div class="coupon-row">
         <input class="coupon-input" type="text" id="couponInput" placeholder="ex: DISCORD20" maxlength="20">
-        <button class="coupon-btn" onclick="applyCoupon()" data-t="coupon-btn">Aplică</button>
+        <button class="coupon-btn" onclick="applyCoupon()" data-t="cb">Aplică</button>
       </div>
       <div class="coupon-msg" id="couponMsg"></div>
     </div>
   </div>
 </div>
 
-<!-- CUM FUNCTIONEAZA -->
 <div id="cum-functioneaza">
   <div class="section" style="text-align:center">
-    <span class="section-tag" data-t="how-tag">Proces simplu</span>
-    <h2 class="section-title" data-t="how-title">Cum funcționează</h2>
-    <p class="section-sub" style="margin:0 auto" data-t="how-sub">De la plată la EA activ în mai puțin de 5 minute.</p>
+    <span class="section-tag" data-t="h-tag">Proces simplu</span>
+    <h2 class="section-title" data-t="h-title">Cum funcționează</h2>
+    <p class="section-sub" style="margin:0 auto" data-t="h-sub">De la plată la EA activ în mai puțin de 5 minute.</p>
     <div class="steps" style="text-align:left">
-      <div class="step-card"><span class="step-num">01</span><div class="step-title" data-t="s1t">Alegi planul</div><div class="step-desc" data-t="s1d">Selectezi planul potrivit și introduci datele cardului. Plata e procesată securizat prin Stripe.</div></div>
-      <div class="step-card"><span class="step-num">02</span><div class="step-title" data-t="s2t">Activare instantă</div><div class="step-desc" data-t="s2d">Imediat după plată, licența ta e activată automat în sistem. Primești email de confirmare.</div></div>
-      <div class="step-card"><span class="step-num">03</span><div class="step-title" data-t="s3t">Descarci EA-ul</div><div class="step-desc" data-t="s3d">Te loghezi în portal, descarci fișierul .ex5 și îl copiezi în folderul Experts din MT5.</div></div>
-      <div class="step-card"><span class="step-num">04</span><div class="step-title" data-t="s4t">Rulează 24/7</div><div class="step-desc" data-t="s4d">Atașezi EA-ul pe grafic, activezi AutoTrading și gata — strategia rulează non-stop pe VPS.</div></div>
+      <div class="step-card"><span class="step-num">01</span><div class="step-title" data-t="st1">Alegi planul</div><div class="step-desc" data-t="sd1">Selectezi planul potrivit și introduci datele cardului. Plata e procesată securizat prin Stripe.</div></div>
+      <div class="step-card"><span class="step-num">02</span><div class="step-title" data-t="st2">Activare instantă</div><div class="step-desc" data-t="sd2">Imediat după plată, licența ta e activată automat în sistem. Primești email de confirmare.</div></div>
+      <div class="step-card"><span class="step-num">03</span><div class="step-title" data-t="st3">Descarci EA-ul</div><div class="step-desc" data-t="sd3">Te loghezi în portal, descarci fișierul .ex5 și îl copiezi în folderul Experts din MT5.</div></div>
+      <div class="step-card"><span class="step-num">04</span><div class="step-title" data-t="st4">Rulează 24/7</div><div class="step-desc" data-t="sd4">Atașezi EA-ul pe grafic, activezi AutoTrading și gata — strategia rulează non-stop pe VPS.</div></div>
+    </div>
+    <div class="vps-note">
+      <div class="vps-note-icon">⚡</div>
+      <div>
+        <div class="vps-note-title" data-t="vps-title">Ai nevoie de un VPS pentru a rula 24/7</div>
+        <div class="vps-note-desc" data-t="vps-desc">Pentru ca EA-ul să funcționeze non-stop chiar și cu PC-ul oprit, ai nevoie de un VPS Windows. Găsești recomandări și ghid de configurare direct pe serverul nostru Discord. <a href="https://discord.gg/your-server" class="vps-note-link" data-t="vps-link">Intră pe Discord →</a></div>
+      </div>
     </div>
   </div>
 </div>
 
-<!-- TESTIMONIALE -->
 <div class="pricing-bg">
   <div class="section" style="text-align:center">
-    <span class="section-tag" data-t="testi-tag">Testimoniale</span>
-    <h2 class="section-title" data-t="testi-title">Ce spun clienții noștri</h2>
+    <span class="section-tag" data-t="tt">Testimoniale</span>
+    <h2 class="section-title" data-t="t-title">Ce spun clienții noștri</h2>
     <div class="testimonials" style="text-align:left">
-      <div class="testi-card"><div class="testi-text" data-t="t1">"EA Strategy 1 rulează de 3 luni fără nicio problemă. Activarea a fost instantă după plată."</div><div class="testi-author">— Andrei P. · <span class="testi-plan">Plan Pro</span></div></div>
-      <div class="testi-card"><div class="testi-text" data-t="t2">"Am luat Full Access și merită fiecare euro. Suportul e rapid și portalul e ușor de folosit."</div><div class="testi-author">— Maria C. · <span class="testi-plan">Full Access</span></div></div>
+      <div class="testi-card"><div class="testi-text" data-t="t1">"EA Strategy 1 rulează de 3 luni fără nicio problemă. Activarea a fost instantă după plată, exact cum promitea."</div><div class="testi-author">— Andrei P. · <span class="testi-plan">Plan Pro</span></div></div>
+      <div class="testi-card"><div class="testi-text" data-t="t2">"Am luat Full Access și merită fiecare euro. Suportul e rapid, EA-urile sunt stabile și portalul e ușor de folosit."</div><div class="testi-author">— Maria C. · <span class="testi-plan">Full Access</span></div></div>
       <div class="testi-card"><div class="testi-text" data-t="t3">"Primul EA pe care l-am rulat mai mult de o lună fără să îl resetez. Recomand cu încredere."</div><div class="testi-author">— George R. · <span class="testi-plan">Plan Basic</span></div></div>
     </div>
   </div>
 </div>
 
-<!-- CTA FINAL -->
 <div class="cta-section">
-  <h2 class="section-title" data-t="cta-title">Gata să începi?</h2>
-  <p class="section-sub" style="margin:14px auto 36px" data-t="cta-sub">7 zile trial gratuit. Fără risc, fără angajament.</p>
-  <a href="#pricing" class="btn-primary" data-t="cta-btn">Alege planul tău</a>
+  <h2 class="section-title" data-t="cta-t">Gata să începi?</h2>
+  <p class="section-sub" style="margin:14px auto 38px" data-t="cta-s">7 zile trial gratuit. Fără risc, fără angajament.</p>
+  <a href="#pricing" class="btn-primary" data-t="cta-b">Alege planul tău</a>
 </div>
 
-<!-- FOOTER -->
 <footer>
   &copy; 2026 EA Strategies &nbsp;·&nbsp;
-  <a href="/check-status" data-t="f-check">Verifică abonamentul</a> &nbsp;·&nbsp;
-  <a href="#" onclick="openModal('login')" data-t="f-login">Login portal</a>
+  <a href="/check-status" data-t="f-chk">Verifică abonamentul</a> &nbsp;·&nbsp;
+  <a href="#" onclick="openModal('login')" data-t="f-log">Login portal</a>
 </footer>
 
-<!-- MODAL -->
 <div class="modal-overlay" id="modalOverlay" onclick="closeOut(event)">
   <div class="modal">
     <button class="modal-close" onclick="closeModal()">✕</button>
-    <div id="vLogin">
-      <div class="modal-title" data-t="l-title">Intră în cont</div>
-      <div class="modal-sub" data-t="l-sub">Accesează portalul tău de licențe</div>
-      <div class="form-group"><label class="form-label" data-t="l-email">Email</label><input class="form-input" type="email" id="lEmail" placeholder="email@exemplu.com"></div>
-      <div class="form-group"><label class="form-label" data-t="l-pass">Parolă</label><input class="form-input" type="password" id="lPass" placeholder="••••••••"></div>
-      <div class="modal-err" id="lErr"></div>
-      <div class="modal-ok"  id="lOk"></div>
-      <button class="modal-btn" onclick="doLogin()" data-t="l-btn">Intră în cont</button>
-      <div class="modal-switch"><span data-t="l-no-acc">Nu ai cont?</span> <a onclick="sw('register')" data-t="l-reg">Înregistrează-te</a></div>
+    <div id="vL">
+      <div class="modal-title" data-t="lt">Intră în cont</div>
+      <div class="modal-sub" data-t="ls">Accesează portalul tău de licențe</div>
+      <div class="form-group"><label class="form-label" data-t="le">Email</label><input class="form-input" type="email" id="lE" placeholder="email@exemplu.com"></div>
+      <div class="form-group"><label class="form-label" data-t="lp">Parolă</label><input class="form-input" type="password" id="lP" placeholder="••••••••"></div>
+      <div class="modal-err" id="lErr"></div><div class="modal-ok" id="lOk"></div>
+      <button class="modal-btn" onclick="doLogin()" data-t="lb">Intră în cont</button>
+      <div class="modal-switch"><span data-t="lna">Nu ai cont?</span> <a onclick="sw('r')" data-t="lr">Înregistrează-te</a></div>
     </div>
-    <div id="vRegister" style="display:none">
-      <div class="modal-title" data-t="r-title">Cont nou</div>
-      <div class="modal-sub" data-t="r-sub">Creează-ți contul de portal</div>
-      <div class="form-group"><label class="form-label" data-t="l-email">Email</label><input class="form-input" type="email" id="rEmail" placeholder="email@exemplu.com"></div>
-      <div class="form-group"><label class="form-label" data-t="l-pass">Parolă</label><input class="form-input" type="password" id="rPass" placeholder="Min. 8 caractere"></div>
-      <div class="form-group"><label class="form-label" data-t="r-mt5">Număr cont MT5</label><input class="form-input" type="text" id="rMt5" placeholder="ex: 12345678"></div>
-      <div class="modal-err" id="rErr"></div>
-      <div class="modal-ok"  id="rOk"></div>
-      <button class="modal-btn" onclick="doRegister()" data-t="r-btn">Creează cont</button>
-      <div class="modal-switch"><span data-t="r-have">Ai deja cont?</span> <a onclick="sw('login')" data-t="r-login">Intră în cont</a></div>
+    <div id="vR" style="display:none">
+      <div class="modal-title" data-t="rt">Cont nou</div>
+      <div class="modal-sub" data-t="rs">Creează-ți contul de portal</div>
+      <div class="form-group"><label class="form-label" data-t="le">Email</label><input class="form-input" type="email" id="rE" placeholder="email@exemplu.com"></div>
+      <div class="form-group"><label class="form-label" data-t="lp">Parolă</label><input class="form-input" type="password" id="rP" placeholder="Min. 8 caractere"></div>
+      <div class="form-group"><label class="form-label" data-t="rm">Număr cont MT5</label><input class="form-input" type="text" id="rM" placeholder="ex: 12345678"></div>
+      <div class="modal-err" id="rErr"></div><div class="modal-ok" id="rOk"></div>
+      <button class="modal-btn" onclick="doRegister()" data-t="rb">Creează cont</button>
+      <div class="modal-switch"><span data-t="rha">Ai deja cont?</span> <a onclick="sw('l')" data-t="rl">Intră în cont</a></div>
     </div>
   </div>
 </div>
 
 <script>
-const SERVER = 'https://ea-license-server-lrsl.onrender.com';
-const COUPONS = { 'DISCORD20':20, 'FRIEND10':10 };
+const SERVER='https://ea-license-server-lrsl.onrender.com';
+const COUPONS={'DISCORD20':20,'FRIEND10':10};
 
-const T = {
+const T={
   ro:{
     'nav-eas':'EA-uri','nav-pricing':'Prețuri','nav-how':'Cum funcționează','nav-login':'Login',
-    'hero-t1':'Trading automatizat','hero-t2':'la nivel profesional',
-    'hero-sub':'Strategii algoritmice MT5 testate, activare instantă după plată, reînnoire automată. Fără complicații.',
-    'hero-cta1':'Vezi planurile','hero-cta2':'Cum funcționează',
-    'stat1':'Strategii active','stat2':'Rulează non-stop','stat3':'Zile trial gratuit','stat4':'Activare după plată',
+    'ht1':'Trading automatizat','ht2':'la nivel profesional',
+    'hs':'Strategii algoritmice MT5 testate, activare instantă după plată, reînnoire automată. Fără complicații.',
+    'hc1':'Vezi planurile','hc2':'Cum funcționează',
+    's1':'Strategii active','s2':'Rulează non-stop','s3':'Zile trial gratuit','s4':'Activare după plată',
     'ea-tag':'Strategiile disponibile','ea-title':'6 EA-uri testate și stabile',
     'ea-sub':'Fiecare strategie e optimizată pentru perechea ei specifică și rulează 24/7 pe VPS dedicat.',
-    'ea1n':'Scalping Pro','ea1d':'Strategie de scalping pe aur, intrări precise pe mișcări rapide de preț.',
-    'ea2n':'Trend Follower','ea2d':'Urmărește tendința principală, intrări cu confirmări multiple pe EUR/USD.',
-    'ea3n':'Grid Master','ea3d':'Sistem grid adaptiv pe GBP/USD, gestionare automată a pozițiilor deschise.',
-    'ea4n':'Breakout Hunter','ea4d':'Captează breakout-uri pe indici, cu filtre de volatilitate și news guard.',
-    'ea5n':'Mean Reversion','ea5d':'Exploatează revenirile la medie, ideal pentru piețe laterale.',
-    'ea6n':'Hedging Multi','ea6d':'Strategie de hedging pe mai multe perechi simultan, risc controlat.',
-    'ea-active':'Activ',
-    'pricing-tag':'Planuri și prețuri','pricing-title':'Simplu și transparent',
-    'pricing-sub':'7 zile trial gratuit la orice plan. Anulare oricând, fără penalizări.',
-    'per-mo':'/lună','popular':'Cel mai popular',
-    'basic-desc':'1 EA la alegere · 1 cont MT5','pro-desc':'3 EA-uri la alegere · 1 cont MT5','full-desc':'Toate EA-urile · 2 conturi MT5',
+    'e1n':'Scalping Pro','e1d':'Strategie de scalping pe aur, intrări precise pe mișcări rapide de preț.',
+    'e2n':'Trend Follower','e2d':'Urmărește tendința principală, intrări cu confirmări multiple pe EUR/USD.',
+    'e3n':'Grid Master','e3d':'Sistem grid adaptiv pe GBP/USD, gestionare automată a pozițiilor deschise.',
+    'e4n':'Breakout Hunter','e4d':'Captează breakout-uri pe indici, cu filtre de volatilitate și news guard.',
+    'e5n':'Mean Reversion','e5d':'Exploatează revenirile la medie, ideal pentru piețe laterale.',
+    'e6n':'Hedging Multi','e6d':'Strategie de hedging pe mai multe perechi simultan, risc controlat.',
+    'ea-act':'Activ',
+    'p-tag':'Planuri și prețuri','p-title':'Simplu și transparent',
+    'p-sub':'7 zile trial gratuit la orice plan. Anulare oricând, fără penalizări.',
+    'pm':'/lună','popular':'Cel mai popular',
+    'ba':'1 cont MT5','pa':'2 conturi MT5','fa':'3 conturi MT5',
+    'bd':'1 EA la alegere · activare instantă','pd':'3 EA-uri la alegere · suport prioritar','fd':'Toate EA-urile · suport direct 1:1',
     'f-s1':'1 strategie la alegere','f-s3':'3 strategii la alegere','f-sa':'Toate cele 6 strategii',
-    'f-a1':'1 cont MT5 atașat','f-a2':'2 conturi MT5 atașate',
+    'f-a1':'1 cont MT5 atașat','f-a2':'2 conturi MT5 atașate','f-a3':'3 conturi MT5 atașate',
     'f-se':'Suport email','f-sp':'Suport prioritar','f-s1x':'Suport direct 1:1',
     'f-dc':'Acces server Discord','f-dv':'Discord VIP acces',
     'f-up':'Update-uri incluse','f-ne':'Strategie nouă gratis','f-tr':'7 zile trial gratuit',
     'btn-tr':'Începe trial gratuit',
-    'trial-note':'Cardul nu e debitat în primele 7 zile · Anulare oricând din portalul tău',
-    'coupon-lbl':'Ai un cod de reducere?','coupon-btn':'Aplică',
-    'how-tag':'Proces simplu','how-title':'Cum funcționează','how-sub':'De la plată la EA activ în mai puțin de 5 minute.',
-    's1t':'Alegi planul','s1d':'Selectezi planul potrivit și introduci datele cardului. Plata e procesată securizat prin Stripe.',
-    's2t':'Activare instantă','s2d':'Imediat după plată, licența ta e activată automat. Primești email de confirmare.',
-    's3t':'Descarci EA-ul','s3d':'Te loghezi în portal, descarci fișierul .ex5 și îl copiezi în folderul Experts din MT5.',
-    's4t':'Rulează 24/7','s4d':'Atașezi EA-ul pe grafic, activezi AutoTrading și gata — strategia rulează non-stop.',
-    'testi-tag':'Testimoniale','testi-title':'Ce spun clienții noștri',
+    'tn':'Cardul nu e debitat în primele 7 zile · Anulare oricând din portalul tău',
+    'cl':'Ai un cod de reducere?','cb':'Aplică',
+    'h-tag':'Proces simplu','h-title':'Cum funcționează','h-sub':'De la plată la EA activ în mai puțin de 5 minute.',
+    'st1':'Alegi planul','sd1':'Selectezi planul potrivit și introduci datele cardului. Plata e procesată securizat prin Stripe.',
+    'st2':'Activare instantă','sd2':'Imediat după plată, licența ta e activată automat. Primești email de confirmare.',
+    'st3':'Descarci EA-ul','sd3':'Te loghezi în portal, descarci fișierul .ex5 și îl copiezi în folderul Experts din MT5.',
+    'st4':'Rulează 24/7','sd4':'Atașezi EA-ul pe grafic, activezi AutoTrading și gata — strategia rulează non-stop.',
+    'vps-title':'Ai nevoie de un VPS pentru a rula 24/7',
+    'vps-desc':'Pentru ca EA-ul să funcționeze non-stop chiar și cu PC-ul oprit, ai nevoie de un VPS Windows. Găsești recomandări și ghid de configurare pe serverul nostru Discord.',
+    'vps-link':'Intră pe Discord →',
+    'tt':'Testimoniale','t-title':'Ce spun clienții noștri',
     't1':'"EA Strategy 1 rulează de 3 luni fără nicio problemă. Activarea a fost instantă după plată."',
     't2':'"Am luat Full Access și merită fiecare euro. Suportul e rapid și portalul e ușor de folosit."',
     't3':'"Primul EA pe care l-am rulat mai mult de o lună fără să îl resetez. Recomand cu încredere."',
-    'cta-title':'Gata să începi?','cta-sub':'7 zile trial gratuit. Fără risc, fără angajament.','cta-btn':'Alege planul tău',
-    'f-check':'Verifică abonamentul','f-login':'Login portal',
-    'l-title':'Intră în cont','l-sub':'Accesează portalul tău de licențe',
-    'l-email':'Email','l-pass':'Parolă','l-btn':'Intră în cont','l-no-acc':'Nu ai cont?','l-reg':'Înregistrează-te',
-    'r-title':'Cont nou','r-sub':'Creează-ți contul de portal','r-mt5':'Număr cont MT5',
-    'r-btn':'Creează cont','r-have':'Ai deja cont?','r-login':'Intră în cont',
-    'coup-ok':'Cupon valid! Reducere activată.','coup-err':'Cod invalid sau expirat.',
-    'l-err-empty':'Completează email și parola.','l-err-inv':'Email sau parolă incorectă.',
-    'r-err-empty':'Completează toate câmpurile.','r-ok':'Cont creat! Verifică emailul.',
-    'mt5-prompt':'Introdu numărul contului tău MT5:'
+    'cta-t':'Gata să începi?','cta-s':'7 zile trial gratuit. Fără risc, fără angajament.','cta-b':'Alege planul tău',
+    'f-chk':'Verifică abonamentul','f-log':'Login portal',
+    'lt':'Intră în cont','ls':'Accesează portalul tău de licențe',
+    'le':'Email','lp':'Parolă','lb':'Intră în cont','lna':'Nu ai cont?','lr':'Înregistrează-te',
+    'rt':'Cont nou','rs':'Creează-ți contul de portal','rm':'Număr cont MT5',
+    'rb':'Creează cont','rha':'Ai deja cont?','rl':'Intră în cont',
+    'co':'Cupon valid! Reducere activată.','ce':'Cod invalid sau expirat.',
+    'lee':'Completează email și parola.','lei':'Email sau parolă incorectă.',
+    'ree':'Completează toate câmpurile.','ro2':'Cont creat! Verifică emailul.',
+    'mp':'Introdu numărul contului tău MT5:'
   },
   en:{
     'nav-eas':'EAs','nav-pricing':'Pricing','nav-how':'How it works','nav-login':'Login',
-    'hero-t1':'Automated trading','hero-t2':'at a professional level',
-    'hero-sub':'Tested MT5 algorithmic strategies, instant activation after payment, automatic renewal. No complications.',
-    'hero-cta1':'View plans','hero-cta2':'How it works',
-    'stat1':'Active strategies','stat2':'Runs non-stop','stat3':'Days free trial','stat4':'Instant activation',
+    'ht1':'Automated trading','ht2':'at a professional level',
+    'hs':'Tested MT5 algorithmic strategies, instant activation after payment, automatic renewal. No complications.',
+    'hc1':'View plans','hc2':'How it works',
+    's1':'Active strategies','s2':'Runs non-stop','s3':'Days free trial','s4':'Instant activation',
     'ea-tag':'Available strategies','ea-title':'6 tested and stable EAs',
     'ea-sub':'Each strategy is optimized for its specific pair and runs 24/7 on a dedicated VPS.',
-    'ea1n':'Scalping Pro','ea1d':'Gold scalping strategy, precise entries on rapid price movements.',
-    'ea2n':'Trend Follower','ea2d':'Follows the main trend, multiple confirmation entries on EUR/USD.',
-    'ea3n':'Grid Master','ea3d':'Adaptive grid system on GBP/USD, automatic management of open positions.',
-    'ea4n':'Breakout Hunter','ea4d':'Captures index breakouts with volatility filters and news guard.',
-    'ea5n':'Mean Reversion','ea5d':'Exploits mean reversions, ideal for sideways markets.',
-    'ea6n':'Hedging Multi','ea6d':'Multi-pair hedging strategy, controlled and diversified risk.',
-    'ea-active':'Active',
-    'pricing-tag':'Plans & pricing','pricing-title':'Simple and transparent',
-    'pricing-sub':'7-day free trial on any plan. Cancel anytime, no penalties.',
-    'per-mo':'/month','popular':'Most popular',
-    'basic-desc':'1 EA of your choice · 1 MT5 account','pro-desc':'3 EAs of your choice · 1 MT5 account','full-desc':'All EAs · 2 MT5 accounts',
+    'e1n':'Scalping Pro','e1d':'Gold scalping strategy, precise entries on rapid price movements.',
+    'e2n':'Trend Follower','e2d':'Follows the main trend, multiple confirmation entries on EUR/USD.',
+    'e3n':'Grid Master','e3d':'Adaptive grid system on GBP/USD, automatic management of open positions.',
+    'e4n':'Breakout Hunter','e4d':'Captures index breakouts with volatility filters and news guard.',
+    'e5n':'Mean Reversion','e5d':'Exploits mean reversions, ideal for sideways markets.',
+    'e6n':'Hedging Multi','e6d':'Multi-pair hedging strategy, controlled and diversified risk.',
+    'ea-act':'Active',
+    'p-tag':'Plans & pricing','p-title':'Simple and transparent',
+    'p-sub':'7-day free trial on any plan. Cancel anytime, no penalties.',
+    'pm':'/month','popular':'Most popular',
+    'ba':'1 MT5 account','pa':'2 MT5 accounts','fa':'3 MT5 accounts',
+    'bd':'1 EA of your choice · instant activation','pd':'3 EAs of your choice · priority support','fd':'All EAs · direct 1:1 support',
     'f-s1':'1 strategy of your choice','f-s3':'3 strategies of your choice','f-sa':'All 6 strategies',
-    'f-a1':'1 MT5 account attached','f-a2':'2 MT5 accounts attached',
+    'f-a1':'1 MT5 account attached','f-a2':'2 MT5 accounts attached','f-a3':'3 MT5 accounts attached',
     'f-se':'Email support','f-sp':'Priority support','f-s1x':'Direct 1:1 support',
     'f-dc':'Discord server access','f-dv':'Discord VIP access',
     'f-up':'Updates included','f-ne':'New strategy for free','f-tr':'7-day free trial',
     'btn-tr':'Start free trial',
-    'trial-note':'Card not charged in the first 7 days · Cancel anytime from your portal',
-    'coupon-lbl':'Have a discount code?','coupon-btn':'Apply',
-    'how-tag':'Simple process','how-title':'How it works','how-sub':'From payment to active EA in less than 5 minutes.',
-    's1t':'Choose your plan','s1d':'Select the right plan and enter card details. Payment processed securely via Stripe.',
-    's2t':'Instant activation','s2d':'Immediately after payment, your license is activated automatically. You receive a confirmation email.',
-    's3t':'Download the EA','s3d':'Log in to the portal, download the .ex5 file and copy it to the Experts folder in MT5.',
-    's4t':'Runs 24/7','s4d':'Attach the EA to the chart, enable AutoTrading and done — the strategy runs non-stop.',
-    'testi-tag':'Testimonials','testi-title':'What our clients say',
+    'tn':'Card not charged in the first 7 days · Cancel anytime from your portal',
+    'cl':'Have a discount code?','cb':'Apply',
+    'h-tag':'Simple process','h-title':'How it works','h-sub':'From payment to active EA in less than 5 minutes.',
+    'st1':'Choose your plan','sd1':'Select the right plan and enter your card details. Payment processed securely via Stripe.',
+    'st2':'Instant activation','sd2':'Immediately after payment, your license is activated automatically. You receive a confirmation email.',
+    'st3':'Download the EA','sd3':'Log in to the portal, download the .ex5 file and copy it to the Experts folder in MT5.',
+    'st4':'Runs 24/7','sd4':'Attach the EA to the chart, enable AutoTrading and done — the strategy runs non-stop.',
+    'vps-title':'You need a VPS to run 24/7',
+    'vps-desc':'For the EA to work non-stop even with your PC off, you need a Windows VPS. Find recommendations and setup guide on our Discord server.',
+    'vps-link':'Join Discord →',
+    'tt':'Testimonials','t-title':'What our clients say',
     't1':'"EA Strategy 1 has been running for 3 months without issues. Activation was instant after payment."',
     't2':'"I got Full Access and it is worth every euro. Support is fast and the portal is easy to use."',
     't3':'"The first EA I have run for more than a month without resetting it. Highly recommended."',
-    'cta-title':'Ready to start?','cta-sub':'7-day free trial. No risk, no commitment.','cta-btn':'Choose your plan',
-    'f-check':'Check subscription','f-login':'Portal login',
-    'l-title':'Sign in','l-sub':'Access your license portal',
-    'l-email':'Email','l-pass':'Password','l-btn':'Sign in','l-no-acc':'No account?','l-reg':'Register',
-    'r-title':'New account','r-sub':'Create your portal account','r-mt5':'MT5 account number',
-    'r-btn':'Create account','r-have':'Already have an account?','r-login':'Sign in',
-    'coup-ok':'Valid coupon! Discount applied.','coup-err':'Invalid or expired code.',
-    'l-err-empty':'Please enter email and password.','l-err-inv':'Incorrect email or password.',
-    'r-err-empty':'Please fill in all fields.','r-ok':'Account created! Check your email.',
-    'mt5-prompt':'Enter your MT5 account number:'
+    'cta-t':'Ready to start?','cta-s':'7-day free trial. No risk, no commitment.','cta-b':'Choose your plan',
+    'f-chk':'Check subscription','f-log':'Portal login',
+    'lt':'Sign in','ls':'Access your license portal',
+    'le':'Email','lp':'Password','lb':'Sign in','lna':'No account?','lr':'Register',
+    'rt':'New account','rs':'Create your portal account','rm':'MT5 account number',
+    'rb':'Create account','rha':'Already have an account?','rl':'Sign in',
+    'co':'Valid coupon! Discount applied.','ce':'Invalid or expired code.',
+    'lee':'Please enter email and password.','lei':'Incorrect email or password.',
+    'ree':'Please fill in all fields.','ro2':'Account created! Check your email.',
+    'mp':'Enter your MT5 account number:'
   },
   de:{
     'nav-eas':'EAs','nav-pricing':'Preise','nav-how':'Wie es funktioniert','nav-login':'Login',
-    'hero-t1':'Automatisiertes Trading','hero-t2':'auf professionellem Niveau',
-    'hero-sub':'Getestete MT5-Algorithmusstrategien, sofortige Aktivierung nach Zahlung, automatische Verlängerung.',
-    'hero-cta1':'Pläne ansehen','hero-cta2':'Wie es funktioniert',
-    'stat1':'Aktive Strategien','stat2':'Läuft rund um die Uhr','stat3':'Tage kostenlose Testversion','stat4':'Sofortige Aktivierung',
+    'ht1':'Automatisiertes Trading','ht2':'auf professionellem Niveau',
+    'hs':'Getestete MT5-Strategien, sofortige Aktivierung nach Zahlung, automatische Verlängerung.',
+    'hc1':'Pläne ansehen','hc2':'Wie es funktioniert',
+    's1':'Aktive Strategien','s2':'Läuft rund um die Uhr','s3':'Tage Testversion','s4':'Sofortige Aktivierung',
     'ea-tag':'Verfügbare Strategien','ea-title':'6 getestete und stabile EAs',
-    'ea-sub':'Jede Strategie ist für ihr spezifisches Paar optimiert und läuft 24/7 auf einem dedizierten VPS.',
-    'ea1n':'Scalping Pro','ea1d':'Gold-Scalping-Strategie, präzise Einstiege bei schnellen Preisbewegungen.',
-    'ea2n':'Trend Follower','ea2d':'Folgt dem Haupttrend, Einstiege mit mehreren Bestätigungen auf EUR/USD.',
-    'ea3n':'Grid Master','ea3d':'Adaptives Grid-System auf GBP/USD, automatisches Management offener Positionen.',
-    'ea4n':'Breakout Hunter','ea4d':'Erfasst Breakouts bei Indizes mit Volatilitätsfiltern und News-Guard.',
-    'ea5n':'Mean Reversion','ea5d':'Nutzt Rückkehr zum Mittelwert, ideal für Seitwärtsmärkte.',
-    'ea6n':'Hedging Multi','ea6d':'Multi-Paar-Hedging-Strategie, kontrolliertes und diversifiziertes Risiko.',
-    'ea-active':'Aktiv',
-    'pricing-tag':'Pläne & Preise','pricing-title':'Einfach und transparent',
-    'pricing-sub':'7 Tage kostenlose Testversion. Jederzeit kündbar, keine Strafen.',
-    'per-mo':'/Monat','popular':'Am beliebtesten',
-    'basic-desc':'1 EA nach Wahl · 1 MT5-Konto','pro-desc':'3 EAs nach Wahl · 1 MT5-Konto','full-desc':'Alle EAs · 2 MT5-Konten',
+    'ea-sub':'Jede Strategie ist für ihr Paar optimiert und läuft 24/7 auf einem dedizierten VPS.',
+    'e1n':'Scalping Pro','e1d':'Gold-Scalping-Strategie, präzise Einstiege bei schnellen Preisbewegungen.',
+    'e2n':'Trend Follower','e2d':'Folgt dem Haupttrend, Einstiege mit mehreren Bestätigungen auf EUR/USD.',
+    'e3n':'Grid Master','e3d':'Adaptives Grid-System auf GBP/USD, automatisches Management offener Positionen.',
+    'e4n':'Breakout Hunter','e4d':'Erfasst Breakouts bei Indizes mit Volatilitätsfiltern und News-Guard.',
+    'e5n':'Mean Reversion','e5d':'Nutzt Rückkehr zum Mittelwert, ideal für Seitwärtsmärkte.',
+    'e6n':'Hedging Multi','e6d':'Multi-Paar-Hedging-Strategie, kontrolliertes und diversifiziertes Risiko.',
+    'ea-act':'Aktiv',
+    'p-tag':'Pläne & Preise','p-title':'Einfach und transparent',
+    'p-sub':'7 Tage kostenlose Testversion. Jederzeit kündbar, keine Strafen.',
+    'pm':'/Monat','popular':'Am beliebtesten',
+    'ba':'1 MT5-Konto','pa':'2 MT5-Konten','fa':'3 MT5-Konten',
+    'bd':'1 EA nach Wahl · sofortige Aktivierung','pd':'3 EAs nach Wahl · Prioritäts-Support','fd':'Alle EAs · direkter 1:1-Support',
     'f-s1':'1 Strategie nach Wahl','f-s3':'3 Strategien nach Wahl','f-sa':'Alle 6 Strategien',
-    'f-a1':'1 MT5-Konto verknüpft','f-a2':'2 MT5-Konten verknüpft',
+    'f-a1':'1 MT5-Konto verknüpft','f-a2':'2 MT5-Konten verknüpft','f-a3':'3 MT5-Konten verknüpft',
     'f-se':'E-Mail-Support','f-sp':'Prioritäts-Support','f-s1x':'Direkter 1:1-Support',
     'f-dc':'Discord-Server-Zugang','f-dv':'Discord VIP-Zugang',
     'f-up':'Updates inklusive','f-ne':'Neue Strategie kostenlos','f-tr':'7 Tage kostenlose Testversion',
     'btn-tr':'Kostenlose Testversion starten',
-    'trial-note':'Karte wird in den ersten 7 Tagen nicht belastet · Jederzeit kündbar',
-    'coupon-lbl':'Haben Sie einen Rabattcode?','coupon-btn':'Anwenden',
-    'how-tag':'Einfacher Prozess','how-title':'Wie es funktioniert','how-sub':'Von der Zahlung zum aktiven EA in weniger als 5 Minuten.',
-    's1t':'Plan wählen','s1d':'Wählen Sie den richtigen Plan und geben Sie Ihre Kartendaten ein. Zahlung wird sicher über Stripe verarbeitet.',
-    's2t':'Sofortige Aktivierung','s2d':'Unmittelbar nach der Zahlung wird Ihre Lizenz automatisch aktiviert. Sie erhalten eine Bestätigungs-E-Mail.',
-    's3t':'EA herunterladen','s3d':'Melden Sie sich im Portal an, laden Sie die .ex5-Datei herunter und kopieren Sie sie in den Experts-Ordner.',
-    's4t':'Läuft 24/7','s4d':'Hängen Sie den EA an den Chart, aktivieren Sie AutoTrading und fertig.',
-    'testi-tag':'Erfahrungsberichte','testi-title':'Was unsere Kunden sagen',
+    'tn':'Karte wird in den ersten 7 Tagen nicht belastet · Jederzeit kündbar',
+    'cl':'Haben Sie einen Rabattcode?','cb':'Anwenden',
+    'h-tag':'Einfacher Prozess','h-title':'Wie es funktioniert','h-sub':'Von der Zahlung zum aktiven EA in weniger als 5 Minuten.',
+    'st1':'Plan wählen','sd1':'Wählen Sie den richtigen Plan und geben Sie Ihre Kartendaten ein. Zahlung sicher über Stripe.',
+    'st2':'Sofortige Aktivierung','sd2':'Unmittelbar nach der Zahlung wird Ihre Lizenz automatisch aktiviert.',
+    'st3':'EA herunterladen','sd3':'Melden Sie sich im Portal an, laden Sie die .ex5-Datei herunter und kopieren Sie sie in MT5.',
+    'st4':'Läuft 24/7','sd4':'Hängen Sie den EA an den Chart, aktivieren Sie AutoTrading und fertig.',
+    'vps-title':'Sie benötigen einen VPS für den 24/7-Betrieb',
+    'vps-desc':'Damit der EA auch bei ausgeschaltetem PC läuft, benötigen Sie einen Windows-VPS. Empfehlungen und Einrichtungsanleitung finden Sie auf unserem Discord-Server.',
+    'vps-link':'Discord beitreten →',
+    'tt':'Erfahrungsberichte','t-title':'Was unsere Kunden sagen',
     't1':'"EA Strategy 1 läuft seit 3 Monaten ohne Probleme. Die Aktivierung war sofort nach der Zahlung."',
     't2':'"Ich habe Full Access genommen und es ist jeden Euro wert. Support ist schnell."',
     't3':'"Der erste EA, den ich länger als einen Monat ohne Reset laufen lasse. Sehr empfehlenswert."',
-    'cta-title':'Bereit anzufangen?','cta-sub':'7 Tage kostenlos. Kein Risiko, keine Verpflichtung.','cta-btn':'Wählen Sie Ihren Plan',
-    'f-check':'Abonnement prüfen','f-login':'Portal-Login',
-    'l-title':'Anmelden','l-sub':'Zugriff auf Ihr Lizenz-Portal',
-    'l-email':'E-Mail','l-pass':'Passwort','l-btn':'Anmelden','l-no-acc':'Kein Konto?','l-reg':'Registrieren',
-    'r-title':'Neues Konto','r-sub':'Erstellen Sie Ihr Portal-Konto','r-mt5':'MT5-Kontonummer',
-    'r-btn':'Konto erstellen','r-have':'Bereits ein Konto?','r-login':'Anmelden',
-    'coup-ok':'Gültiger Gutschein! Rabatt aktiviert.','coup-err':'Ungültiger oder abgelaufener Code.',
-    'l-err-empty':'Bitte E-Mail und Passwort eingeben.','l-err-inv':'Falsche E-Mail oder Passwort.',
-    'r-err-empty':'Bitte alle Felder ausfüllen.','r-ok':'Konto erstellt! Überprüfen Sie Ihre E-Mail.',
-    'mt5-prompt':'Geben Sie Ihre MT5-Kontonummer ein:'
+    'cta-t':'Bereit anzufangen?','cta-s':'7 Tage kostenlos. Kein Risiko.','cta-b':'Wählen Sie Ihren Plan',
+    'f-chk':'Abonnement prüfen','f-log':'Portal-Login',
+    'lt':'Anmelden','ls':'Zugriff auf Ihr Lizenz-Portal',
+    'le':'E-Mail','lp':'Passwort','lb':'Anmelden','lna':'Kein Konto?','lr':'Registrieren',
+    'rt':'Neues Konto','rs':'Erstellen Sie Ihr Portal-Konto','rm':'MT5-Kontonummer',
+    'rb':'Konto erstellen','rha':'Bereits ein Konto?','rl':'Anmelden',
+    'co':'Gültiger Gutschein! Rabatt aktiviert.','ce':'Ungültiger oder abgelaufener Code.',
+    'lee':'Bitte E-Mail und Passwort eingeben.','lei':'Falsche E-Mail oder Passwort.',
+    'ree':'Bitte alle Felder ausfüllen.','ro2':'Konto erstellt! Überprüfen Sie Ihre E-Mail.',
+    'mp':'Geben Sie Ihre MT5-Kontonummer ein:'
   }
 };
 
-let lang = 'ro';
+let lang='ro';
 
-function detectLang(){
-  const bl=(navigator.language||'en').toLowerCase().substring(0,2);
-  return ['ro','en','de'].includes(bl)?bl:'en';
-}
+function detectLang(){const bl=(navigator.language||'en').toLowerCase().substring(0,2);return ['ro','en','de'].includes(bl)?bl:'en';}
 
 function applyLang(l){
-  lang=l;
-  const t=T[l];
-  document.querySelectorAll('[data-t]').forEach(el=>{
-    const k=el.getAttribute('data-t');
-    if(t[k]!==undefined) el.textContent=t[k];
-  });
+  lang=l;const t=T[l];
+  document.querySelectorAll('[data-t]').forEach(el=>{const k=el.getAttribute('data-t');if(t[k]!==undefined)el.textContent=t[k];});
 }
 
 function setLang(l,el){
   document.querySelectorAll('.lang-btn').forEach(b=>b.classList.remove('active'));
-  el.classList.add('active');
-  applyLang(l);
+  el.classList.add('active');applyLang(l);
 }
 
-function openModal(v){ document.getElementById('modalOverlay').classList.add('open'); sw(v); }
-function closeModal(){ document.getElementById('modalOverlay').classList.remove('open'); }
-function closeOut(e){ if(e.target===document.getElementById('modalOverlay')) closeModal(); }
-function sw(v){
-  document.getElementById('vLogin').style.display    = v==='login'    ?'block':'none';
-  document.getElementById('vRegister').style.display = v==='register' ?'block':'none';
-}
+function openModal(v){document.getElementById('modalOverlay').classList.add('open');sw(v==='login'?'l':'r');}
+function closeModal(){document.getElementById('modalOverlay').classList.remove('open');}
+function closeOut(e){if(e.target===document.getElementById('modalOverlay'))closeModal();}
+function sw(v){document.getElementById('vL').style.display=v==='l'?'block':'none';document.getElementById('vR').style.display=v==='r'?'block':'none';}
 
 function applyCoupon(){
-  const t=T[lang];
-  const val=document.getElementById('couponInput').value.trim().toUpperCase();
-  const msg=document.getElementById('couponMsg');
-  msg.className='coupon-msg'; msg.style.display='block';
-  if(COUPONS[val]){
-    msg.classList.add('coupon-ok');
-    msg.textContent=t['coup-ok']+' (-'+COUPONS[val]+'%)';
-    localStorage.setItem('ea_coupon',val);
-  } else {
-    msg.classList.add('coupon-err');
-    msg.textContent=t['coup-err'];
-  }
+  const t=T[lang];const val=document.getElementById('couponInput').value.trim().toUpperCase();
+  const msg=document.getElementById('couponMsg');msg.className='coupon-msg';msg.style.display='block';
+  if(COUPONS[val]){msg.classList.add('c-ok');msg.textContent=t['co']+' (-'+COUPONS[val]+'%)';localStorage.setItem('ea_coupon',val);}
+  else{msg.classList.add('c-err');msg.textContent=t['ce'];}
 }
 
 async function startCheckout(plan){
-  const t=T[lang];
-  const mt5=prompt(t['mt5-prompt']);
-  if(!mt5||mt5.trim().length<5) return;
-  try {
-    const res=await fetch(SERVER+'/api/create-payment',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({account_id:mt5.trim(),months:1})
-    });
+  const t=T[lang];const mt5=prompt(t['mp']);
+  if(!mt5||mt5.trim().length<5)return;
+  try{
+    const res=await fetch(SERVER+'/api/create-payment',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_id:mt5.trim(),months:1})});
     const data=await res.json();
-    if(data.url) window.location.href=data.url;
+    if(data.url)window.location.href=data.url;
     else alert('Eroare: '+JSON.stringify(data));
-  } catch(e){
-    alert('Eroare conexiune. Încearcă din nou.');
-  }
+  }catch(e){alert('Eroare conexiune. Încearcă din nou.');}
 }
 
 function doLogin(){
-  const t=T[lang];
-  const email=document.getElementById('lEmail').value.trim();
-  const pass=document.getElementById('lPass').value;
-  const err=document.getElementById('lErr');
-  const ok=document.getElementById('lOk');
-  err.style.display='none'; ok.style.display='none';
-  if(!email||!pass){err.textContent=t['l-err-empty'];err.style.display='block';return;}
-  ok.textContent='Se conectează...'; ok.style.display='block';
-  setTimeout(()=>{
-    ok.style.display='none';
-    window.location.href='/client';
-  },1000);
+  const t=T[lang];const email=document.getElementById('lE').value.trim();const pass=document.getElementById('lP').value;
+  const err=document.getElementById('lErr');const ok=document.getElementById('lOk');
+  err.style.display='none';ok.style.display='none';
+  if(!email||!pass){err.textContent=t['lee'];err.style.display='block';return;}
+  ok.textContent='Se conectează...';ok.style.display='block';
+  setTimeout(()=>{ok.style.display='none';window.location.href='/client';},1000);
 }
 
 function doRegister(){
-  const t=T[lang];
-  const email=document.getElementById('rEmail').value.trim();
-  const pass=document.getElementById('rPass').value;
-  const mt5=document.getElementById('rMt5').value.trim();
-  const err=document.getElementById('rErr');
-  const ok=document.getElementById('rOk');
-  err.style.display='none'; ok.style.display='none';
-  if(!email||!pass||!mt5){err.textContent=t['r-err-empty'];err.style.display='block';return;}
-  ok.textContent=t['r-ok']; ok.style.display='block';
+  const t=T[lang];const email=document.getElementById('rE').value.trim();const pass=document.getElementById('rP').value;const mt5=document.getElementById('rM').value.trim();
+  const err=document.getElementById('rErr');const ok=document.getElementById('rOk');
+  err.style.display='none';ok.style.display='none';
+  if(!email||!pass||!mt5){err.textContent=t['ree'];err.style.display='block';return;}
+  ok.textContent=t['ro2'];ok.style.display='block';
 }
 
-// Auto-detect
 const det=detectLang();
 const btns=document.querySelectorAll('.lang-btn');
 btns.forEach(b=>b.classList.remove('active'));
-const map={'ro':0,'en':1,'de':2};
-if(btns[map[det]]) btns[map[det]].classList.add('active');
+const bmap={'ro':0,'en':1,'de':2};
+if(btns[bmap[det]])btns[bmap[det]].classList.add('active');
 applyLang(det);
 </script>
 </body>
