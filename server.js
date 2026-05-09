@@ -16,6 +16,9 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 // ─── Admin Panel ──────────────────────────────────────────────────────────────
 const ADMIN_KEY = process.env.ADMIN_KEY || 'schimba-aceasta-cheie-secreta';
 
+app.get('/landing', (req, res) => {
+  res.sendFile(path.join(__dirname, 'landing.html'));
+});
 app.get('/admin-panel', (req, res) => {
   const k = req.query.key || req.headers['x-admin-key'];
   if (!k || k !== ADMIN_KEY) return res.status(401).send('Unauthorized');
