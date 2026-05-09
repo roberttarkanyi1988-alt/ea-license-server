@@ -40,8 +40,8 @@ nav{
 /* HERO */
 .hero{
   min-height:100vh;display:flex;flex-direction:column;
-  align-items:center;justify-content:center;
-  text-align:center;padding:56px 24px 60px;
+  align-items:center;justify-content:flex-end;
+  text-align:center;padding:56px 24px 120px;
 }
 .hero-title{
   font-size:clamp(32px,4.5vw,56px);
@@ -88,13 +88,13 @@ nav{
 .plan-card:hover{transform:translateY(-4px);}
 .plan-card.featured{border-color:var(--accent);box-shadow:0 0 50px rgba(0,229,160,.08);}
 .plan-badge{position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:var(--accent);color:#000;font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;padding:4px 16px;border-radius:20px;white-space:nowrap;}
-.plan-name{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;}
-.plan-price{font-family:var(--mono);font-size:44px;font-weight:700;color:var(--text);margin-bottom:4px;line-height:1;}
+.plan-name{font-size:13px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:10px;}
+.plan-price{font-family:var(--mono);font-size:50px;font-weight:700;color:var(--text);margin-bottom:4px;line-height:1;}
 .plan-price span{font-size:15px;color:var(--muted);font-weight:400;}
 .plan-accounts{display:inline-block;font-family:var(--mono);font-size:11px;color:var(--accent2);background:rgba(0,102,255,.08);padding:3px 10px;border-radius:4px;margin-bottom:16px;}
-.plan-desc{font-size:13px;color:var(--muted);margin-bottom:22px;padding-bottom:22px;border-bottom:1px solid var(--border);}
+.plan-desc{font-size:15px;color:var(--muted);margin-bottom:22px;padding-bottom:22px;border-bottom:1px solid var(--border);}
 .plan-features{list-style:none;margin-bottom:28px;}
-.plan-features li{font-size:13px;color:var(--muted);padding:6px 0;display:flex;align-items:center;gap:10px;}
+.plan-features li{font-size:15px;color:var(--muted);padding:6px 0;display:flex;align-items:center;gap:10px;}
 .plan-features li::before{content:'✓';color:var(--accent);font-weight:700;font-size:12px;flex-shrink:0;}
 .plan-features li.hl{color:var(--text);font-weight:600;}
 .plan-btn{width:100%;padding:14px;border-radius:8px;font-family:var(--sans);font-size:13px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;transition:all .2s;border:1px solid var(--border);background:transparent;color:var(--text);}
