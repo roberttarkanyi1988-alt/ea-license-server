@@ -177,6 +177,7 @@ tr:hover td{background:rgba(255,255,255,.02);}
             <input class="search-input" type="text" id="searchInput" placeholder="Caută..." oninput="filterClients()">
             <button class="btn-secondary" onclick="loadClients()" style="padding:6px 14px;font-size:11px">↻ Refresh</button>
             <button class="btn-primary" onclick="exportCSV()" style="padding:6px 14px;font-size:11px">⬇ CSV</button>
+            <button class="btn-secondary" onclick="generateAdminPDF()" style="padding:6px 14px;font-size:11px;color:#00e5a0;border-color:#00e5a0">📄 PDF Raport</button>
           </div>
         </div>
         <div style="overflow-x:auto">
@@ -504,6 +505,86 @@ function exportCSV(){
   a.href = URL.createObjectURL(blob);
   a.download = 'ea-clients-'+new Date().toISOString().split('T')[0]+'.csv';
   a.click();
+}
+
+
+function generateAdminPDF() {
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('ro-RO');
+  const active = allClients.filter(c=>c.status==='active').length;
+  const revenue = active * 45;
+
+  const rows = allClients.map(c => {
+    const exp = new Date(c.expires_at);
+    const days = Math.ceil((exp - now) / 86400000);
+    const statusText = c.status === 'active' ? 'Activ' : c.status === 'suspended' ? 'Suspendat' : 'Expirat';
+    return `<tr>
+      <td>${c.account_id}</td>
+      <td>${c.email || '—'}</td>
+      <td>${c.plan || 'monthly'}</td>
+      <td style="color:${c.status==='active'?'#00a86b':'#cc0000'}">${statusText}</td>
+      <td>${c.expires_at}</td>
+      <td>${c.status==='active'&&days>0?days+' zile':'—'}</td>
+      <td>${c.notes || '—'}</td>
+    </tr>`;
+  }).join('');
+
+  const win = window.open('', '_blank');
+  win.document.write(`<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Raport Clienți EA Strategies — ${dateStr}</title>
+<style>
+  body { font-family: Arial, sans-serif; padding: 30px; color: #1a1a1a; }
+  .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 30px; border-bottom: 3px solid #00e5a0; padding-bottom: 16px; }
+  .company { font-size: 20px; font-weight: 800; }
+  .company-sub { font-size: 11px; color: #666; margin-top: 3px; }
+  .report-title { font-size: 22px; font-weight: 700; text-align: right; }
+  .report-date { font-size: 11px; color: #666; text-align: right; }
+  .metrics { display: flex; gap: 20px; margin-bottom: 24px; }
+  .metric { flex: 1; background: #f5f5f5; border-radius: 8px; padding: 14px; text-align: center; }
+  .metric-val { font-size: 24px; font-weight: 700; color: #0a0c0f; }
+  .metric-lbl { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { background: #0a0c0f; color: #fff; padding: 10px 12px; text-align: left; font-size: 11px; text-transform: uppercase; }
+  td { padding: 10px 12px; border-bottom: 1px solid #eee; }
+  tr:hover td { background: #fafafa; }
+  .footer { text-align: center; margin-top: 30px; font-size: 10px; color: #999; border-top: 1px solid #eee; padding-top: 14px; }
+  @media print { body { padding: 15px; } }
+</style>
+</head>
+<body>
+<div class="header">
+  <div>
+    <div class="company">EA Strategies</div>
+    <div class="company-sub">Raport intern — Confidențial</div>
+    <div class="company-sub">ea-license-server-lrsl.onrender.com</div>
+  </div>
+  <div>
+    <div class="report-title">RAPORT CLIENȚI</div>
+    <div class="report-date">Generat: ${dateStr}</div>
+  </div>
+</div>
+<div class="metrics">
+  <div class="metric"><div class="metric-val">${allClients.length}</div><div class="metric-lbl">Total licențe</div></div>
+  <div class="metric"><div class="metric-val">${active}</div><div class="metric-lbl">Clienți activi</div></div>
+  <div class="metric"><div class="metric-val">€${revenue}</div><div class="metric-lbl">Revenue lunar est.</div></div>
+  <div class="metric"><div class="metric-val">${allClients.length - active}</div><div class="metric-lbl">Inactive</div></div>
+</div>
+<table>
+  <thead>
+    <tr><th>Cont MT5</th><th>Email</th><th>Plan</th><th>Status</th><th>Expiră</th><th>Zile rămase</th><th>Note</th></tr>
+  </thead>
+  <tbody>${rows}</tbody>
+</table>
+<div class="footer">
+  <p>EA Strategies — Document generat automat pe ${dateStr} | Confidențial — doar pentru uz intern</p>
+</div>
+<scr"+"ipt>window.onload = function(){ window.print(); }</scr"+"ipt>
+</body>
+</html>`);
+  win.document.close();
 }
 
 function showErr(id, msg){
