@@ -591,25 +591,20 @@ const bmap={'ro':0,'en':1,'de':2};
 if(btns[bmap[det]]) btns[bmap[det]].classList.add('active');
 applyLang(det);
 
-// Check session cu timeout
-const sessionTimeout = setTimeout(()=>{
-  show('viewLogin'); showForm('login');
-}, 3000);
-
-sb.auth.getSession().then(({ data:{ session } }) => {
-  clearTimeout(sessionTimeout);
+// Init — show login immediately, check session in background
+show('viewLoading');
+sb.auth.getSession().then(({ data }) => {
+  const session = data?.session;
   if(session && session.user){
-    const u = session.user;
     renderPortal({
-      name: u.user_metadata?.full_name || u.email,
-      email: u.email,
+      name: session.user.user_metadata?.full_name || session.user.email,
+      email: session.user.email,
       ...DEMO
     });
   } else {
     show('viewLogin'); showForm('login');
   }
-}).catch(()=>{
-  clearTimeout(sessionTimeout);
+}).catch(() => {
   show('viewLogin'); showForm('login');
 });
 </script>
