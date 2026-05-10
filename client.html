@@ -409,10 +409,16 @@ function renderPortal(userData){
   const invEl = document.getElementById('invEl');
   invEl.innerHTML = '';
   invoices.forEach(inv=>{
+    const invDate = inv.date;
+    const invPlan = inv.plan;
+    const invAmt = inv.amount;
+    const invName = u.name || '';
+    const invEmail = u.email || '';
     invEl.innerHTML += `
       <div class="inv-row">
         <div><div class="inv-date">${inv.date}</div><div class="inv-plan">${inv.plan}</div></div>
-        <div style="display:flex;align-items:center"><div class="inv-amount">${inv.amount}</div><button class="inv-btn">${t('inv-pdf')}</button></div>
+        <div style="display:flex;align-items:center"><div class="inv-amount">${inv.amount}</div>
+        <button class="inv-btn" onclick="generateInvoicePDF('${invDate}','${invPlan}','${invAmt}','${invName}','${invEmail}')">${t('inv-pdf')}</button></div>
       </div>`;
   });
 
