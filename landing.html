@@ -166,6 +166,38 @@ footer a{color:var(--accent);text-decoration:none;}
 .modal-err{font-size:12px;color:var(--danger);margin-top:8px;display:none;font-family:var(--mono);}
 .modal-ok{font-size:12px;color:var(--accent);margin-top:8px;display:none;font-family:var(--mono);}
 
+
+/* RISK BANNER */
+.risk-banner {
+  background: rgba(255,184,0,0.06);
+  border-bottom: 1px solid rgba(255,184,0,0.2);
+  padding: 10px 32px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 12px;
+  color: #b8860b;
+  line-height: 1.5;
+  position: fixed;
+  top: 56px;
+  left: 0; right: 0;
+  z-index: 190;
+}
+.risk-banner-icon { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+.risk-banner-text { flex: 1; }
+.risk-banner-text b { color: var(--warn); }
+.risk-footer {
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  padding: 20px 32px;
+  font-size: 11px;
+  color: var(--muted);
+  font-family: var(--mono);
+  line-height: 1.6;
+  text-align: center;
+}
+.risk-footer b { color: rgba(255,184,0,0.7); }
+
 @media(max-width:768px){
   nav{padding:0 16px;}
   .nav-c{display:none;}
@@ -366,6 +398,11 @@ footer a{color:var(--accent);text-decoration:none;}
   </div>
 </div>
 
+<!-- RISK FOOTER -->
+<div class="risk-footer" id="riskFooter">
+  <span id="riskFooterText"><b>⚠ Avertisment de risc:</b> Tranzacționarea implică riscuri majore de pierdere a capitalului. Nu oferim consiliere financiară. Rezultatele trecute nu sunt garanție pentru viitor.</span>
+</div>
+
 <script>
 const SERVER='https://ea-license-server-lrsl.onrender.com';
 const COUPONS={'DISCORD20':20,'FRIEND10':10};
@@ -535,9 +572,29 @@ function applyLang(l){
   document.querySelectorAll('[data-t]').forEach(el=>{const k=el.getAttribute('data-t');if(t[k]!==undefined)el.textContent=t[k];});
 }
 
+
+const RISK_TEXTS = {
+  ro: '<b>Avertisment de risc:</b> Trading-ul pe piețele financiare implică riscuri semnificative și poți pierde integral capitalul investit. EA-urile noastre sunt instrumente automate — nu consiliere financiară. Rezultatele trecute nu garantează performanțe viitoare. Tranzacționează doar cu bani pe care îți permiți să îi pierzi.',
+  en: '<b>Risk Warning:</b> Trading financial markets involves significant risk and you may lose all invested capital. Our EAs are automated tools — not financial advice. Past results do not guarantee future performance. Only trade with money you can afford to lose.',
+  de: '<b>Risikowarnung:</b> Der Handel an Finanzmärkten birgt erhebliche Risiken und Sie können Ihr gesamtes investiertes Kapital verlieren. Unsere EAs sind automatisierte Tools — keine Finanzberatung. Vergangene Ergebnisse garantieren keine zukünftige Performance.'
+};
+
+const RISK_FOOTER_TEXTS = {
+  ro: '<b>⚠ Avertisment de risc:</b> Tranzacționarea implică riscuri majore de pierdere a capitalului. Nu oferim consiliere financiară. Rezultatele trecute nu sunt garanție pentru viitor.',
+  en: '<b>⚠ Risk Warning:</b> Trading involves substantial risk of capital loss. We do not provide financial advice. Past performance is not a guarantee of future results.',
+  de: '<b>⚠ Risikowarnung:</b> Der Handel birgt erhebliche Verlustrisiken. Wir bieten keine Finanzberatung an. Vergangene Leistungen sind keine Garantie für zukünftige Ergebnisse.'
+};
+
+function updateRiskBanner(l) {
+  const el = document.getElementById('riskBannerText');
+  if (el && RISK_TEXTS[l]) el.innerHTML = RISK_TEXTS[l];
+  const fe = document.getElementById('riskFooterText');
+  if (fe && RISK_FOOTER_TEXTS[l]) fe.innerHTML = RISK_FOOTER_TEXTS[l];
+}
+
 function setLang(l,el){
   document.querySelectorAll('.lang-btn').forEach(b=>b.classList.remove('active'));
-  el.classList.add('active');applyLang(l);
+  el.classList.add('active');applyLang(l);updateRiskBanner(l);
 }
 
 function openModal(v){document.getElementById('modalOverlay').classList.add('open');sw(v==='login'?'l':'r');}
@@ -586,6 +643,7 @@ btns.forEach(b=>b.classList.remove('active'));
 const bmap={'ro':0,'en':1,'de':2};
 if(btns[bmap[det]])btns[bmap[det]].classList.add('active');
 applyLang(det);
+updateRiskBanner(det);
 </script>
 </body>
 </html>
