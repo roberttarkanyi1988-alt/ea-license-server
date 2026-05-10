@@ -3,6 +3,7 @@ const { Pool } = require('pg');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
 require('dotenv').config();
+const { Client, GatewayIntentBits } = require('discord.js');
 
 const app = express();
 
@@ -23,6 +24,7 @@ app.get('/client', (req, res) => {
 app.get('/landing', (req, res) => {
   res.sendFile(path.join(__dirname, 'landing.html'));
 });
+
 app.get('/admin-panel', (req, res) => {
   const k = req.query.key || req.headers['x-admin-key'];
   if (!k || k !== ADMIN_KEY) return res.status(401).send('Unauthorized');
@@ -70,18 +72,83 @@ async function sendTelegram(message) {
     await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: TELEGRAM_CHAT_ID,
-        text: message,
-        parse_mode: 'HTML'
-      })
+      body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text: message, parse_mode: 'HTML' })
     });
   } catch(e) {
     console.error('Telegram error:', e.message);
   }
 }
 
-// Verificare zilnică a licențelor care expiră
+// ─── DISCORD BOT ──────────────────────────────────────────────────────────────
+const DISCORD_GUILD_ID = '1500420643290615918';
+const DISCORD_ROLES = {
+  basic: '1503110227438993469',
+  pro:   '1503110421740257471',
+  full:  '1503108475495125033'
+};
+
+const discordClient = new Client({
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers]
+});
+
+discordClient.once('ready', () => {
+  console.log(`✅ Discord bot conectat: ${discordClient.user.tag}`);
+});
+
+if (process.env.DISCORD_BOT_TOKEN) {
+  discordClient.login(process.env.DISCORD_BOT_TOKEN).catch(err => {
+    console.error('Discord login error:', err.message);
+  });
+}
+
+function getRoleIdForPlan(plan) {
+  if (!plan) return DISCORD_ROLES.basic;
+  const p = plan.toLowerCase();
+  if (p.includes('full')) return DISCORD_ROLES.full;
+  if (p.includes('pro'))  return DISCORD_ROLES.pro;
+  return DISCORD_ROLES.basic;
+}
+
+async function addDiscordRole(email, plan) {
+  try {
+    if (!discordClient.isReady()) return false;
+    const guild = await discordClient.guilds.fetch(DISCORD_GUILD_ID);
+    const members = await guild.members.fetch();
+    const member = members.find(m =>
+      m.user.username.toLowerCase().includes(email.split('@')[0].toLowerCase())
+    );
+    if (!member) { console.log(`Discord: ${email} negăsit`); return false; }
+    const roleId = getRoleIdForPlan(plan);
+    await member.roles.add(roleId);
+    console.log(`✅ Discord: rol ${plan} adăugat pentru ${email}`);
+    return true;
+  } catch(e) {
+    console.error('Discord addRole error:', e.message);
+    return false;
+  }
+}
+
+async function removeDiscordRole(email) {
+  try {
+    if (!discordClient.isReady()) return false;
+    const guild = await discordClient.guilds.fetch(DISCORD_GUILD_ID);
+    const members = await guild.members.fetch();
+    const member = members.find(m =>
+      m.user.username.toLowerCase().includes(email.split('@')[0].toLowerCase())
+    );
+    if (!member) { console.log(`Discord: ${email} negăsit`); return false; }
+    for (const roleId of Object.values(DISCORD_ROLES)) {
+      if (member.roles.cache.has(roleId)) await member.roles.remove(roleId);
+    }
+    console.log(`✅ Discord: roluri șterse pentru ${email}`);
+    return true;
+  } catch(e) {
+    console.error('Discord removeRole error:', e.message);
+    return false;
+  }
+}
+
+// ─── Verificare zilnică ───────────────────────────────────────────────────────
 async function checkExpiringLicenses() {
   try {
     const result = await pool.query(`
@@ -98,6 +165,15 @@ async function checkExpiringLicenses() {
         `📅 Expiră: ${row.expires_at}`
       );
     }
+
+    // Sterge roluri Discord pentru licente expirate
+    const expired = await pool.query(`
+      SELECT * FROM licenses WHERE status = 'active' AND expires_at::date < CURRENT_DATE
+    `);
+    for (const row of expired.rows) {
+      if (row.email) await removeDiscordRole(row.email);
+      await pool.query("UPDATE licenses SET status='expired' WHERE account_id=$1", [row.account_id]);
+    }
   } catch(e) {
     console.error('Expiry check error:', e.message);
   }
@@ -105,9 +181,7 @@ async function checkExpiringLicenses() {
 
 setInterval(() => {
   const now = new Date();
-  if (now.getHours() === 9 && now.getMinutes() === 0) {
-    checkExpiringLicenses();
-  }
+  if (now.getHours() === 9 && now.getMinutes() === 0) checkExpiringLicenses();
 }, 60000);
 
 // ─── Rate Limiting ────────────────────────────────────────────────────────────
@@ -136,6 +210,7 @@ app.get('/api/check', async (req, res) => {
   const expiry = new Date(row.expires_at);
   if (now > expiry) {
     await pool.query("UPDATE licenses SET status='expired' WHERE account_id=$1", [account]);
+    if (row.email) await removeDiscordRole(row.email);
     await logAccess(account, ip, 'EXPIRED');
     return res.send('EXPIRED');
   }
@@ -146,8 +221,7 @@ app.get('/api/check', async (req, res) => {
 });
 
 // ─── STRIPE: Creare link de plată ─────────────────────────────────────────────
-// POST /api/create-payment { account_id, email, months }
-app.post('/api/create-payment', adminAuth, async (req, res) => {
+app.post('/api/create-payment', async (req, res) => {
   const { account_id, email, months = 1 } = req.body;
   if (!account_id) return res.status(400).json({ error: 'account_id required' });
 
@@ -156,15 +230,11 @@ app.post('/api/create-payment', adminAuth, async (req, res) => {
       payment_method_types: ['card'],
       mode: 'subscription',
       customer_email: email || undefined,
-      line_items: [{
-        price: process.env.STRIPE_PRICE_ID,
-        quantity: months
-      }],
+      line_items: [{ price: process.env.STRIPE_PRICE_ID, quantity: months }],
       metadata: { account_id, months: String(months), email: email || '' },
-      success_url: `${process.env.RENDER_EXTERNAL_URL || 'https://ea-license-server-lrsl.onrender.com'}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url:  `${process.env.RENDER_EXTERNAL_URL || 'https://ea-license-server-lrsl.onrender.com'}/payment-cancel`,
+      success_url: 'https://ea-license-server-lrsl.onrender.com/payment-success?session_id={CHECKOUT_SESSION_ID}',
+      cancel_url:  'https://ea-license-server-lrsl.onrender.com/payment-cancel',
     });
-
     res.json({ url: session.url, session_id: session.id });
   } catch(e) {
     console.error('Stripe error:', e.message);
@@ -172,7 +242,7 @@ app.post('/api/create-payment', adminAuth, async (req, res) => {
   }
 });
 
-// ─── STRIPE: Webhook (plată confirmată) ───────────────────────────────────────
+// ─── STRIPE: Webhook ──────────────────────────────────────────────────────────
 app.post('/webhook', async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
@@ -188,7 +258,6 @@ app.post('/webhook', async (req, res) => {
     const session = event.data.object;
     const { account_id, months, email } = session.metadata;
 
-    // Activează licența automat
     const base = new Date();
     base.setDate(base.getDate() + (parseInt(months) * 30));
     const expiresAt = base.toISOString().split('T')[0];
@@ -201,36 +270,62 @@ app.post('/webhook', async (req, res) => {
         expires_at=excluded.expires_at, notes=excluded.notes
     `, [account_id, email, expiresAt]);
 
+    // Adauga rol Discord automat
+    if (email) await addDiscordRole(email, 'basic');
+
     await sendTelegram(
-      `💳 <b>Plată primită prin Stripe!</b>\n` +
-      `👤 Cont: <b>#${account_id}</b>\n` +
-      `📧 Email: ${email || 'nespecificat'}\n` +
-      `📅 Activ până: ${expiresAt}\n` +
-      `💰 Luni: ${months}`
+      `💳 <b>Plată primită!</b>\n👤 Cont: <b>#${account_id}</b>\n📧 Email: ${email || 'nespecificat'}\n📅 Activ până: ${expiresAt}`
     );
+  }
+
+  if (event.type === 'customer.subscription.deleted' || event.type === 'invoice.payment_failed') {
+    const obj = event.data.object;
+    const email = obj.customer_email || obj.metadata?.email;
+    if (email) {
+      await removeDiscordRole(email);
+      await pool.query("UPDATE licenses SET status='expired' WHERE email=$1", [email]);
+      await sendTelegram(`❌ <b>Abonament anulat/expirat!</b>\n📧 Email: ${email}`);
+    }
   }
 
   res.json({ received: true });
 });
 
-// ─── Pagini success/cancel Stripe ─────────────────────────────────────────────
+// ─── DISCORD: Adauga rol manual ───────────────────────────────────────────────
+app.post('/discord/add-role', adminAuth, async (req, res) => {
+  const { email, plan } = req.body;
+  const result = await addDiscordRole(email, plan);
+  res.json({ success: result });
+});
+
+// ─── DISCORD: Sterge rol manual ───────────────────────────────────────────────
+app.post('/discord/remove-role', adminAuth, async (req, res) => {
+  const { email } = req.body;
+  const result = await removeDiscordRole(email);
+  res.json({ success: result });
+});
+
+// ─── Pagini Stripe ────────────────────────────────────────────────────────────
 app.get('/payment-success', (req, res) => {
   res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:50px;background:#0a0c0f;color:#e8eaf0;">
     <h1 style="color:#00e5a0;">✅ Plată reușită!</h1>
     <p>Abonamentul tău a fost activat. Poți închide această pagină.</p>
+    <a href="/client" style="color:#00e5a0;">Mergi la portal →</a>
   </body></html>`);
 });
 
 app.get('/payment-cancel', (req, res) => {
   res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:50px;background:#0a0c0f;color:#e8eaf0;">
     <h1 style="color:#ff3d5a;">❌ Plată anulată</h1>
-    <p>Plata a fost anulată. Contactează furnizorul pentru asistență.</p>
+    <p>Plata a fost anulată. Contactează-ne pentru asistență.</p>
+    <a href="/landing" style="color:#00e5a0;">Înapoi la pagina principală →</a>
   </body></html>`);
 });
-// ─── Pagină publică verificare abonament ─────────────────────────────────────
+
+// ─── Check Status ─────────────────────────────────────────────────────────────
 app.get('/check-status', async (req, res) => {
   const { account } = req.query;
-  
+
   if (!account) {
     return res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:50px;background:#0a0c0f;color:#e8eaf0;">
       <h2>Verifică abonamentul tău</h2>
@@ -272,7 +367,7 @@ app.get('/check-status', async (req, res) => {
   </body></html>`);
 });
 
-// ─── ADMIN: Adaugă / reînnoiește licență ─────────────────────────────────────
+// ─── ADMIN Endpoints ──────────────────────────────────────────────────────────
 app.post('/admin/license', adminAuth, async (req, res) => {
   const { account_id, email, months = 1, plan = 'monthly', notes } = req.body;
   if (!account_id) return res.status(400).json({ error: 'account_id required' });
@@ -300,20 +395,15 @@ app.post('/admin/license', adminAuth, async (req, res) => {
   `, [account_id, email, plan, expiresAt, notes]);
 
   await sendTelegram(
-    `✅ <b>Licență adăugată manual!</b>\n` +
-    `👤 Cont: <b>#${account_id}</b>\n` +
-    `📧 Email: ${email || 'nespecificat'}\n` +
-    `📅 Expiră: ${expiresAt}`
+    `✅ <b>Licență adăugată manual!</b>\n👤 Cont: <b>#${account_id}</b>\n📧 Email: ${email || 'nespecificat'}\n📅 Expiră: ${expiresAt}`
   );
 
   res.json({ success: true, account_id, expires_at: expiresAt, months_added: months });
 });
 
-// ─── ADMIN: Creare link plată Stripe ─────────────────────────────────────────
 app.post('/admin/payment-link', adminAuth, async (req, res) => {
   const { account_id, email, months = 1 } = req.body;
   if (!account_id) return res.status(400).json({ error: 'account_id required' });
-
   try {
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
@@ -330,7 +420,6 @@ app.post('/admin/payment-link', adminAuth, async (req, res) => {
   }
 });
 
-// ─── ADMIN: Suspendă ──────────────────────────────────────────────────────────
 app.patch('/admin/license/:account_id/suspend', adminAuth, async (req, res) => {
   const { account_id } = req.params;
   const r = await pool.query("UPDATE licenses SET status='suspended' WHERE account_id=$1", [account_id]);
@@ -339,7 +428,6 @@ app.patch('/admin/license/:account_id/suspend', adminAuth, async (req, res) => {
   res.json({ success: true, account_id, status: 'suspended' });
 });
 
-// ─── ADMIN: Activează ─────────────────────────────────────────────────────────
 app.patch('/admin/license/:account_id/activate', adminAuth, async (req, res) => {
   const { account_id } = req.params;
   await pool.query("UPDATE licenses SET status='active' WHERE account_id=$1", [account_id]);
@@ -347,19 +435,16 @@ app.patch('/admin/license/:account_id/activate', adminAuth, async (req, res) => 
   res.json({ success: true, account_id, status: 'active' });
 });
 
-// ─── ADMIN: Șterge ────────────────────────────────────────────────────────────
 app.delete('/admin/license/:account_id', adminAuth, async (req, res) => {
   await pool.query('DELETE FROM licenses WHERE account_id=$1', [req.params.account_id]);
   res.json({ success: true });
 });
 
-// ─── ADMIN: Listare ───────────────────────────────────────────────────────────
 app.get('/admin/licenses', adminAuth, async (req, res) => {
   const result = await pool.query('SELECT * FROM licenses ORDER BY expires_at ASC');
   res.json(result.rows);
 });
 
-// ─── ADMIN: Logs ──────────────────────────────────────────────────────────────
 app.get('/admin/logs', adminAuth, async (req, res) => {
   const { account } = req.query;
   let result;
@@ -371,7 +456,6 @@ app.get('/admin/logs', adminAuth, async (req, res) => {
   res.json(result.rows);
 });
 
-// ─── Helper ───────────────────────────────────────────────────────────────────
 async function logAccess(account, ip, result) {
   try {
     await pool.query('INSERT INTO access_log (account_id, ip, result) VALUES ($1,$2,$3)', [account, ip, result]);
@@ -382,5 +466,5 @@ async function logAccess(account, ip, result) {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`✅ License server running on port ${PORT}`);
-  sendTelegram('🚀 <b>EA Manager Server pornit!</b>\nServerul de licențe funcționează.');
+  sendTelegram('🚀 <b>EA Manager Server pornit!</b>');
 });
