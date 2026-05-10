@@ -434,11 +434,14 @@ function showView(v){
 function renderPortal(){
   const t=T[lang];
   const u=user||DEMO_USER;
-  // Ensure accounts and invoices are always populated
-  if (!u.accounts) u.accounts = DEMO_USER.accounts;
-  if (!u.invoices) u.invoices = DEMO_USER.invoices;
-  if (!u.maxAccounts) u.maxAccounts = DEMO_USER.maxAccounts;
-  if (!u.licenses) u.licenses = DEMO_USER.licenses;
+  // Always use demo data as fallback
+  u.accounts = u.accounts && u.accounts.length ? u.accounts : DEMO_USER.accounts;
+  u.invoices = u.invoices && u.invoices.length ? u.invoices : DEMO_USER.invoices;
+  u.maxAccounts = u.maxAccounts || DEMO_USER.maxAccounts;
+  u.licenses = u.licenses && u.licenses.length ? u.licenses : DEMO_USER.licenses;
+  // Set global accounts and maxAccounts
+  accounts = [...u.accounts];
+  maxAccounts = u.maxAccounts;
 
   // Avatar & name
   const initials=u.name.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase();
