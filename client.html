@@ -434,6 +434,11 @@ function showView(v){
 function renderPortal(){
   const t=T[lang];
   const u=user||DEMO_USER;
+  // Ensure accounts and invoices are always populated
+  if (!u.accounts) u.accounts = DEMO_USER.accounts;
+  if (!u.invoices) u.invoices = DEMO_USER.invoices;
+  if (!u.maxAccounts) u.maxAccounts = DEMO_USER.maxAccounts;
+  if (!u.licenses) u.licenses = DEMO_USER.licenses;
 
   // Avatar & name
   const initials=u.name.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase();
@@ -608,7 +613,13 @@ async function checkSupabaseSession() {
     user = {
       ...DEMO_USER,
       name: session.user.user_metadata?.full_name || session.user.email,
-      email: session.user.email
+      email: session.user.email,
+      accounts: DEMO_USER.accounts,
+      invoices: DEMO_USER.invoices,
+      licenses: DEMO_USER.licenses,
+      maxAccounts: DEMO_USER.maxAccounts,
+      plan: DEMO_USER.plan,
+      memberSince: DEMO_USER.memberSince
     };
     sessionStorage.setItem('ea_user', JSON.stringify(user));
     return true;
