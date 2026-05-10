@@ -25,6 +25,10 @@ app.get('/landing', (req, res) => {
   res.sendFile(path.join(__dirname, 'landing.html'));
 });
 
+app.get('/admin', (req, res) => {
+  res.sendFile(path.join(__dirname, 'admin.html'));
+});
+
 app.get('/admin-panel', (req, res) => {
   const k = req.query.key || req.headers['x-admin-key'];
   if (!k || k !== ADMIN_KEY) return res.status(401).send('Unauthorized');
