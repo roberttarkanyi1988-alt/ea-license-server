@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EA Strategies — Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0a0c0f;--surface:#111318;--card:#161a22;--border:#1e2330;--accent:#00e5a0;--accent2:#0066ff;--danger:#ff3d5a;--warn:#ffb800;--text:#e8eaf0;--muted:#5a6070;--mono:'JetBrains Mono',monospace;--sans:'Syne',sans-serif;}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;}
+
+/* NAV */
+nav{position:fixed;top:0;left:0;right:0;z-index:200;background:rgba(10,12,15,0.96);backdrop-filter:blur(12px);border-bottom:1px solid var(--border);padding:0 32px;display:flex;align-items:center;justify-content:space-between;height:56px;}
+.logo{font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text);display:flex;align-items:center;gap:10px;text-decoration:none;}
+.logo-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent);animation:pulse 2s infinite;}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.5;transform:scale(.8);}}
+.nav-r{display:flex;align-items:center;gap:8px;}
+.admin-badge{padding:4px 12px;border-radius:20px;background:rgba(255,184,0,.1);border:1px solid rgba(255,184,0,.3);font-size:11px;font-weight:700;color:var(--warn);letter-spacing:.06em;}
+.btn-logout{padding:7px 16px;background:transparent;color:var(--muted);border:1px solid var(--border);border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--sans);transition:all .2s;}
+.btn-logout:hover{border-color:var(--danger);color:var(--danger);}
+
+/* LOGIN */
+.login-gate{display:flex;align-items:center;justify-content:center;min-height:100vh;}
+.login-box{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:40px;width:100%;max-width:360px;text-align:center;}
+.login-title{font-size:20px;font-weight:600;margin-bottom:6px;}
+.login-sub{font-size:13px;color:var(--muted);margin-bottom:24px;}
+.form-input{width:100%;padding:10px 13px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:13px;outline:none;transition:border-color .2s;margin-bottom:12px;}
+.form-input:focus{border-color:var(--accent);}
+.form-btn{width:100%;padding:13px;background:var(--accent);color:#000;border:none;border-radius:8px;font-family:var(--sans);font-size:13px;font-weight:700;cursor:pointer;transition:all .2s;}
+.form-btn:hover{background:#00ffb3;}
+.form-err{font-size:12px;color:var(--danger);margin-top:8px;display:none;font-family:var(--mono);}
+
+/* MAIN */
+.main{max-width:1100px;margin:0 auto;padding:80px 24px 60px;}
+
+/* TABS */
+.tabs{display:flex;gap:4px;margin-bottom:24px;border-bottom:1px solid var(--border);padding-bottom:0;}
+.tab{padding:8px 20px;font-size:12px;font-weight:600;cursor:pointer;color:var(--muted);border:none;background:none;font-family:var(--sans);border-bottom:2px solid transparent;margin-bottom:-1px;transition:all .2s;}
+.tab:hover{color:var(--text);}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent);}
+
+/* METRICS */
+.metrics-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:24px;}
+.metric{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;}
+.metric-lbl{font-size:11px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px;}
+.metric-val{font-size:28px;font-weight:600;color:var(--text);font-family:var(--mono);}
+.metric-sub{font-size:12px;margin-top:4px;}
+.green{color:#1D9E75;}.red{color:var(--danger);}.blue{color:var(--accent2);}.amber{color:var(--warn);}
+
+/* CHART */
+.chart-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px;}
+.chart-title{font-size:12px;font-weight:600;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:16px;}
+.chart-bars{display:flex;align-items:flex-end;gap:8px;height:100px;}
+.bar-wrap{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;}
+.bar{width:100%;background:#B5D4F4;border-radius:4px 4px 0 0;min-height:4px;transition:height .3s;}
+.bar.curr{background:var(--accent);}
+.bar-lbl{font-size:10px;color:var(--muted);font-family:var(--mono);}
+.bar-val{font-size:10px;color:var(--muted);font-family:var(--mono);}
+
+/* TABLE */
+.table-card{background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:20px;}
+.table-header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);}
+.table-title{font-size:12px;font-weight:600;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;}
+.search-input{padding:6px 12px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:12px;outline:none;width:200px;}
+.search-input:focus{border-color:var(--accent);}
+table{width:100%;border-collapse:collapse;font-size:13px;}
+th{text-align:left;padding:10px 16px;color:var(--muted);font-weight:400;font-size:11px;letter-spacing:.06em;text-transform:uppercase;border-bottom:1px solid var(--border);}
+td{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text);}
+tr:last-child td{border-bottom:none;}
+tr:hover td{background:rgba(255,255,255,.02);}
+.pill{display:inline-block;font-size:10px;padding:2px 8px;border-radius:20px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;}
+.pill-green{background:rgba(0,229,160,.1);color:var(--accent);border:1px solid rgba(0,229,160,.2);}
+.pill-red{background:rgba(255,61,90,.1);color:var(--danger);border:1px solid rgba(255,61,90,.2);}
+.pill-amber{background:rgba(255,184,0,.1);color:var(--warn);border:1px solid rgba(255,184,0,.2);}
+.pill-blue{background:rgba(0,102,255,.1);color:#4d9fff;border:1px solid rgba(0,102,255,.2);}
+.action-btn{padding:4px 10px;border-radius:6px;border:1px solid var(--border);font-size:11px;cursor:pointer;font-family:var(--sans);background:transparent;color:var(--muted);transition:all .2s;margin-right:4px;}
+.action-btn:hover{border-color:var(--accent);color:var(--accent);}
+.action-btn.danger:hover{border-color:var(--danger);color:var(--danger);}
+
+/* FORM CARD */
+.form-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px;}
+.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:12px;}
+.form-group{display:flex;flex-direction:column;gap:6px;}
+.form-label{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);}
+.form-control{padding:9px 12px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:13px;outline:none;transition:border-color .2s;}
+.form-control:focus{border-color:var(--accent);}
+.btn-primary{padding:10px 20px;background:var(--accent);color:#000;border:none;border-radius:8px;font-family:var(--sans);font-size:12px;font-weight:700;cursor:pointer;transition:all .2s;}
+.btn-primary:hover{background:#00ffb3;}
+.btn-secondary{padding:10px 20px;background:transparent;color:var(--text);border:1px solid var(--border);border-radius:8px;font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer;transition:all .2s;}
+.btn-secondary:hover{border-color:var(--accent);color:var(--accent);}
+.msg-ok{font-size:12px;color:var(--accent);margin-top:8px;display:none;font-family:var(--mono);}
+.msg-err{font-size:12px;color:var(--danger);margin-top:8px;display:none;font-family:var(--mono);}
+
+/* RENEWAL LIST */
+.renewal-item{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--border);}
+.renewal-item:last-child{border-bottom:none;}
+.renewal-name{font-size:13px;font-weight:600;color:var(--text);}
+.renewal-plan{font-size:11px;color:var(--muted);margin-top:2px;}
+.renewal-date{font-size:12px;color:var(--text);font-family:var(--mono);}
+
+/* TWO COL */
+.two-col{display:grid;grid-template-columns:1.6fr 1fr;gap:16px;}
+
+@media(max-width:768px){nav{padding:0 16px;}.main{padding:72px 16px 40px;}.two-col{grid-template-columns:1fr;}.metrics-grid{grid-template-columns:1fr 1fr;}}
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="/landing" class="logo"><div class="logo-dot"></div><span>EA Strategies</span></a>
+  <div class="nav-r">
+    <span class="admin-badge">⚡ Admin</span>
+    <button class="btn-logout" onclick="doLogout()">Ieși</button>
+  </div>
+</nav>
+
+<div class="main">
+
+  <!-- LOGIN -->
+  <div id="viewLogin" class="login-gate">
+    <div class="login-box">
+      <div class="login-title">🔐 Admin Access</div>
+      <div class="login-sub">Introdu cheia de admin pentru acces</div>
+      <input class="form-input" type="password" id="adminKey" placeholder="Cheia admin..." onkeydown="if(event.key==='Enter')doLogin()">
+      <div class="form-err" id="loginErr">Cheie incorectă!</div>
+      <button class="form-btn" onclick="doLogin()">Intră</button>
+    </div>
+  </div>
+
+  <!-- DASHBOARD -->
+  <div id="viewDashboard" style="display:none">
+
+    <div class="tabs">
+      <button class="tab active" onclick="showTab('overview',this)">📊 Overview</button>
+      <button class="tab" onclick="showTab('clients',this)">👥 Clienți</button>
+      <button class="tab" onclick="showTab('add',this)">➕ Adaugă licență</button>
+      <button class="tab" onclick="showTab('discord',this)">💬 Discord</button>
+    </div>
+
+    <!-- OVERVIEW TAB -->
+    <div id="tab-overview">
+      <div class="metrics-grid">
+        <div class="metric"><div class="metric-lbl">Clienți activi</div><div class="metric-val" id="mActive">—</div><div class="metric-sub green" id="mActiveSub"></div></div>
+        <div class="metric"><div class="metric-lbl">Revenue lunar est.</div><div class="metric-val" id="mRevenue">—</div><div class="metric-sub green">abonamente active</div></div>
+        <div class="metric"><div class="metric-lbl">Expiră în 7 zile</div><div class="metric-val" id="mExpiring">—</div><div class="metric-sub red" id="mExpiringSub"></div></div>
+        <div class="metric"><div class="metric-lbl">Total licențe</div><div class="metric-val" id="mTotal">—</div><div class="metric-sub" style="color:var(--muted)" id="mTotalSub"></div></div>
+      </div>
+
+      <div class="two-col">
+        <div class="chart-card">
+          <div class="chart-title">Revenue simulat pe luni</div>
+          <div class="chart-bars">
+            <div class="bar-wrap"><div class="bar-val">€290</div><div class="bar" style="height:35%"></div><div class="bar-lbl">Dec</div></div>
+            <div class="bar-wrap"><div class="bar-val">€320</div><div class="bar" style="height:39%"></div><div class="bar-lbl">Ian</div></div>
+            <div class="bar-wrap"><div class="bar-val">€370</div><div class="bar" style="height:45%"></div><div class="bar-lbl">Feb</div></div>
+            <div class="bar-wrap"><div class="bar-val">€410</div><div class="bar" style="height:50%"></div><div class="bar-lbl">Mar</div></div>
+            <div class="bar-wrap"><div class="bar-val">€430</div><div class="bar" style="height:52%"></div><div class="bar-lbl">Apr</div></div>
+            <div class="bar-wrap"><div class="bar-val">€548</div><div class="bar curr" style="height:67%"></div><div class="bar-lbl">Mai</div></div>
+          </div>
+        </div>
+
+        <div class="chart-card">
+          <div class="chart-title">Reînnoiri în 7 zile</div>
+          <div id="renewalList"><div style="font-size:13px;color:var(--muted);">Se încarcă...</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CLIENTS TAB -->
+    <div id="tab-clients" style="display:none">
+      <div class="table-card">
+        <div class="table-header">
+          <div class="table-title">Toți clienții</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input class="search-input" type="text" id="searchInput" placeholder="Caută..." oninput="filterClients()">
+            <button class="btn-secondary" onclick="loadClients()" style="padding:6px 14px;font-size:11px">↻ Refresh</button>
+            <button class="btn-primary" onclick="exportCSV()" style="padding:6px 14px;font-size:11px">⬇ CSV</button>
+          </div>
+        </div>
+        <div style="overflow-x:auto">
+          <table>
+            <thead>
+              <tr>
+                <th>Cont MT5</th>
+                <th>Email</th>
+                <th>Plan</th>
+                <th>Status</th>
+                <th>Expiră</th>
+                <th>Note</th>
+                <th>Acțiuni</th>
+              </tr>
+            </thead>
+            <tbody id="clientsTable">
+              <tr><td colspan="7" style="text-align:center;color:var(--muted);padding:24px">Se încarcă...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ADD LICENSE TAB -->
+    <div id="tab-add" style="display:none">
+      <div class="form-card">
+        <div class="chart-title">Adaugă / Reînnoiește licență</div>
+        <div class="form-grid">
+          <div class="form-group"><label class="form-label">Cont MT5 *</label><input class="form-control" type="text" id="addAccount" placeholder="ex: 12345678"></div>
+          <div class="form-group"><label class="form-label">Email</label><input class="form-control" type="email" id="addEmail" placeholder="client@email.com"></div>
+          <div class="form-group"><label class="form-label">Luni</label><select class="form-control" id="addMonths"><option value="1">1 lună</option><option value="3">3 luni</option><option value="6">6 luni</option><option value="12">12 luni</option></select></div>
+          <div class="form-group"><label class="form-label">Plan</label><select class="form-control" id="addPlan"><option value="basic">Basic</option><option value="pro">Pro</option><option value="full">Full Access</option></select></div>
+        </div>
+        <div class="form-group" style="margin-bottom:12px"><label class="form-label">Note</label><input class="form-control" type="text" id="addNotes" placeholder="Optional..."></div>
+        <div style="display:flex;gap:8px">
+          <button class="btn-primary" onclick="addLicense()">✅ Adaugă licență</button>
+          <button class="btn-secondary" onclick="generatePayLink()">🔗 Generează link plată</button>
+        </div>
+        <div class="msg-ok" id="addOk"></div>
+        <div class="msg-err" id="addErr"></div>
+      </div>
+
+      <div class="form-card">
+        <div class="chart-title">Link plată generat</div>
+        <div id="payLinkBox" style="font-family:var(--mono);font-size:12px;color:var(--muted);padding:12px;background:var(--surface);border-radius:8px;word-break:break-all;">
+          Completează formularul de sus și apasă "Generează link plată"
+        </div>
+      </div>
+    </div>
+
+    <!-- DISCORD TAB -->
+    <div id="tab-discord" style="display:none">
+      <div class="form-card">
+        <div class="chart-title">Gestionare roluri Discord</div>
+        <div class="form-grid">
+          <div class="form-group"><label class="form-label">Email client</label><input class="form-control" type="email" id="discordEmail" placeholder="client@email.com"></div>
+          <div class="form-group"><label class="form-label">Plan / Rol</label><select class="form-control" id="discordPlan"><option value="basic">Basic</option><option value="pro">Pro</option><option value="full">Full Access</option></select></div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:4px">
+          <button class="btn-primary" onclick="addDiscordRole()">➕ Adaugă rol</button>
+          <button class="btn-secondary" onclick="removeDiscordRole()" style="color:var(--danger);border-color:var(--danger)">➖ Șterge rol</button>
+        </div>
+        <div class="msg-ok" id="discordOk"></div>
+        <div class="msg-err" id="discordErr"></div>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-title">Info Discord Bot</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px">
+          <div style="background:var(--surface);border-radius:8px;padding:12px"><div style="color:var(--muted);font-size:11px;margin-bottom:4px">SERVER ID</div><div style="font-family:var(--mono)">1500420643290615918</div></div>
+          <div style="background:var(--surface);border-radius:8px;padding:12px"><div style="color:var(--muted);font-size:11px;margin-bottom:4px">ROL BASIC</div><div style="font-family:var(--mono)">1503110227438993469</div></div>
+          <div style="background:var(--surface);border-radius:8px;padding:12px"><div style="color:var(--muted);font-size:11px;margin-bottom:4px">ROL PRO</div><div style="font-family:var(--mono)">1503110421740257471</div></div>
+          <div style="background:var(--surface);border-radius:8px;padding:12px"><div style="color:var(--muted);font-size:11px;margin-bottom:4px">ROL FULL ACCESS</div><div style="font-family:var(--mono)">1503108475495125033</div></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const SERVER = 'https://ea-license-server-lrsl.onrender.com';
+let ADMIN_KEY = '';
+let allClients = [];
+
+function doLogin(){
+  const key = document.getElementById('adminKey').value.trim();
+  if (!key){ showErr('loginErr','Introdu cheia!'); return; }
+  ADMIN_KEY = key;
+  // Test key
+  fetch(SERVER+'/admin/licenses', { headers:{ 'x-admin-key': key } })
+    .then(r => {
+      if(r.ok){ sessionStorage.setItem('ea_admin_key', key); showDashboard(); }
+      else { showErr('loginErr','Cheie incorectă!'); ADMIN_KEY=''; }
+    })
+    .catch(() => showErr('loginErr','Eroare conexiune server.'));
+}
+
+function doLogout(){
+  sessionStorage.removeItem('ea_admin_key');
+  ADMIN_KEY='';
+  document.getElementById('viewLogin').style.display='flex';
+  document.getElementById('viewDashboard').style.display='none';
+}
+
+function showDashboard(){
+  document.getElementById('viewLogin').style.display='none';
+  document.getElementById('viewDashboard').style.display='block';
+  loadAll();
+}
+
+function showTab(id, el){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  ['overview','clients','add','discord'].forEach(t=>{
+    document.getElementById('tab-'+t).style.display = t===id ? 'block' : 'none';
+  });
+  if(id==='clients') loadClients();
+}
+
+async function loadAll(){
+  await loadClients();
+  updateMetrics();
+  updateRenewals();
+}
+
+async function loadClients(){
+  try {
+    const r = await fetch(SERVER+'/admin/licenses', { headers:{ 'x-admin-key': ADMIN_KEY } });
+    allClients = await r.json();
+    renderClients(allClients);
+    updateMetrics();
+    updateRenewals();
+  } catch(e){
+    document.getElementById('clientsTable').innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--danger)">Eroare la încărcare!</td></tr>';
+  }
+}
+
+function renderClients(clients){
+  const tbody = document.getElementById('clientsTable');
+  if(!clients.length){ tbody.innerHTML='<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:24px">Niciun client găsit</td></tr>'; return; }
+  tbody.innerHTML = clients.map(c => {
+    const now = new Date();
+    const exp = new Date(c.expires_at);
+    const days = Math.ceil((exp-now)/86400000);
+    const statusPill = c.status==='active' 
+      ? `<span class="pill pill-green">Activ</span>` 
+      : c.status==='suspended' 
+        ? `<span class="pill pill-amber">Suspendat</span>`
+        : `<span class="pill pill-red">Expirat</span>`;
+    const planPill = `<span class="pill pill-blue">${c.plan||'monthly'}</span>`;
+    return `<tr>
+      <td style="font-family:var(--mono)">${c.account_id}</td>
+      <td style="font-size:12px;color:var(--muted)">${c.email||'—'}</td>
+      <td>${planPill}</td>
+      <td>${statusPill}</td>
+      <td style="font-family:var(--mono);font-size:12px">${c.expires_at} ${c.status==='active'&&days>0?`<span style="color:var(--accent);font-size:10px">(${days}z)</span>`:''}</td>
+      <td style="font-size:12px;color:var(--muted)">${c.notes||'—'}</td>
+      <td>
+        ${c.status!=='active'?`<button class="action-btn" onclick="activateClient('${c.account_id}')">✅ Activ</button>`:''}
+        ${c.status==='active'?`<button class="action-btn" onclick="suspendClient('${c.account_id}')">⏸ Suspend</button>`:''}
+        <button class="action-btn danger" onclick="deleteClient('${c.account_id}')">🗑</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function filterClients(){
+  const q = document.getElementById('searchInput').value.toLowerCase();
+  const filtered = allClients.filter(c =>
+    (c.account_id||'').toLowerCase().includes(q) ||
+    (c.email||'').toLowerCase().includes(q) ||
+    (c.plan||'').toLowerCase().includes(q) ||
+    (c.status||'').toLowerCase().includes(q)
+  );
+  renderClients(filtered);
+}
+
+function updateMetrics(){
+  const active = allClients.filter(c=>c.status==='active').length;
+  const total = allClients.length;
+  const now = new Date();
+  const expiring = allClients.filter(c=>{
+    const days = Math.ceil((new Date(c.expires_at)-now)/86400000);
+    return c.status==='active' && days<=7 && days>0;
+  }).length;
+  const revenue = active * 45; // estimat €45/client
+  document.getElementById('mActive').textContent = active;
+  document.getElementById('mActiveSub').textContent = `din ${total} total`;
+  document.getElementById('mRevenue').textContent = `€${revenue}`;
+  document.getElementById('mExpiring').textContent = expiring;
+  document.getElementById('mExpiringSub').textContent = expiring>0 ? 'necesită atenție' : 'totul ok';
+  document.getElementById('mTotal').textContent = total;
+  document.getElementById('mTotalSub').textContent = `${total-active} inactive`;
+}
+
+function updateRenewals(){
+  const now = new Date();
+  const expiring = allClients.filter(c=>{
+    const days = Math.ceil((new Date(c.expires_at)-now)/86400000);
+    return c.status==='active' && days<=7 && days>0;
+  }).sort((a,b)=>new Date(a.expires_at)-new Date(b.expires_at));
+
+  const box = document.getElementById('renewalList');
+  if(!expiring.length){ box.innerHTML='<div style="font-size:13px;color:var(--accent)">✅ Nicio reînnoire urgentă</div>'; return; }
+  box.innerHTML = expiring.map(c=>{
+    const days = Math.ceil((new Date(c.expires_at)-now)/86400000);
+    return `<div class="renewal-item">
+      <div><div class="renewal-name">${c.account_id}</div><div class="renewal-plan">${c.email||'—'} · ${c.plan||'monthly'}</div></div>
+      <div style="text-align:right"><div class="renewal-date">${c.expires_at}</div><div style="font-size:11px;color:${days<=3?'var(--danger)':'var(--warn)'};">${days} zile</div></div>
+    </div>`;
+  }).join('');
+}
+
+async function addLicense(){
+  const account = document.getElementById('addAccount').value.trim();
+  const email   = document.getElementById('addEmail').value.trim();
+  const months  = document.getElementById('addMonths').value;
+  const plan    = document.getElementById('addPlan').value;
+  const notes   = document.getElementById('addNotes').value.trim();
+  const ok  = document.getElementById('addOk');
+  const err = document.getElementById('addErr');
+  ok.style.display='none'; err.style.display='none';
+  if(!account){ err.textContent='Contul MT5 e obligatoriu!'; err.style.display='block'; return; }
+  try {
+    const r = await fetch(SERVER+'/admin/license', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-admin-key':ADMIN_KEY},
+      body: JSON.stringify({ account_id:account, email, months:parseInt(months), plan, notes })
+    });
+    const data = await r.json();
+    if(data.success){
+      ok.textContent = `✅ Licență adăugată! Expiră: ${data.expires_at}`;
+      ok.style.display='block';
+      document.getElementById('addAccount').value='';
+      document.getElementById('addEmail').value='';
+      document.getElementById('addNotes').value='';
+      loadClients();
+    } else {
+      err.textContent = 'Eroare: '+JSON.stringify(data); err.style.display='block';
+    }
+  } catch(e){ err.textContent='Eroare conexiune!'; err.style.display='block'; }
+}
+
+async function generatePayLink(){
+  const account = document.getElementById('addAccount').value.trim();
+  const email   = document.getElementById('addEmail').value.trim();
+  const months  = document.getElementById('addMonths').value;
+  const err = document.getElementById('addErr');
+  err.style.display='none';
+  if(!account){ err.textContent='Contul MT5 e obligatoriu!'; err.style.display='block'; return; }
+  try {
+    const r = await fetch(SERVER+'/admin/payment-link', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-admin-key':ADMIN_KEY},
+      body: JSON.stringify({ account_id:account, email, months:parseInt(months) })
+    });
+    const data = await r.json();
+    if(data.url){
+      document.getElementById('payLinkBox').innerHTML = `<a href="${data.url}" target="_blank" style="color:var(--accent)">${data.url}</a>`;
+    }
+  } catch(e){ err.textContent='Eroare conexiune!'; err.style.display='block'; }
+}
+
+async function suspendClient(id){
+  if(!confirm('Suspendezi contul '+id+'?')) return;
+  await fetch(SERVER+'/admin/license/'+id+'/suspend', { method:'PATCH', headers:{'x-admin-key':ADMIN_KEY} });
+  loadClients();
+}
+
+async function activateClient(id){
+  await fetch(SERVER+'/admin/license/'+id+'/activate', { method:'PATCH', headers:{'x-admin-key':ADMIN_KEY} });
+  loadClients();
+}
+
+async function deleteClient(id){
+  if(!confirm('Ștergi definitiv contul '+id+'? Nu se poate recupera!')) return;
+  await fetch(SERVER+'/admin/license/'+id, { method:'DELETE', headers:{'x-admin-key':ADMIN_KEY} });
+  loadClients();
+}
+
+async function addDiscordRole(){
+  const email = document.getElementById('discordEmail').value.trim();
+  const plan  = document.getElementById('discordPlan').value;
+  const ok  = document.getElementById('discordOk');
+  const err = document.getElementById('discordErr');
+  ok.style.display='none'; err.style.display='none';
+  if(!email){ err.textContent='Introdu emailul!'; err.style.display='block'; return; }
+  try {
+    const r = await fetch(SERVER+'/discord/add-role', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-admin-key':ADMIN_KEY},
+      body: JSON.stringify({ email, plan })
+    });
+    const data = await r.json();
+    if(data.success){ ok.textContent='✅ Rol adăugat pe Discord!'; ok.style.display='block'; }
+    else { err.textContent='Utilizatorul nu a fost găsit pe Discord!'; err.style.display='block'; }
+  } catch(e){ err.textContent='Eroare conexiune!'; err.style.display='block'; }
+}
+
+async function removeDiscordRole(){
+  const email = document.getElementById('discordEmail').value.trim();
+  const ok  = document.getElementById('discordOk');
+  const err = document.getElementById('discordErr');
+  ok.style.display='none'; err.style.display='none';
+  if(!email){ err.textContent='Introdu emailul!'; err.style.display='block'; return; }
+  try {
+    const r = await fetch(SERVER+'/discord/remove-role', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-admin-key':ADMIN_KEY},
+      body: JSON.stringify({ email })
+    });
+    const data = await r.json();
+    if(data.success){ ok.textContent='✅ Rol șters de pe Discord!'; ok.style.display='block'; }
+    else { err.textContent='Utilizatorul nu a fost găsit pe Discord!'; err.style.display='block'; }
+  } catch(e){ err.textContent='Eroare conexiune!'; err.style.display='block'; }
+}
+
+function exportCSV(){
+  const headers = ['Cont MT5','Email','Plan','Status','Expiră','Note'];
+  const rows = allClients.map(c=>[c.account_id,c.email||'',c.plan||'',c.status,c.expires_at,c.notes||'']);
+  const csv = [headers,...rows].map(r=>r.join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'ea-clients-'+new Date().toISOString().split('T')[0]+'.csv';
+  a.click();
+}
+
+function showErr(id, msg){
+  const el = document.getElementById(id);
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+// Check session
+const saved = sessionStorage.getItem('ea_admin_key');
+if(saved){ ADMIN_KEY=saved; showDashboard(); }
+</script>
+</body>
+</html>
