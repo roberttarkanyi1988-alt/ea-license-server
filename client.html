@@ -591,9 +591,13 @@ const bmap={'ro':0,'en':1,'de':2};
 if(btns[bmap[det]]) btns[bmap[det]].classList.add('active');
 applyLang(det);
 
-// Check session
-(async()=>{
-  const { data:{ session } } = await sb.auth.getSession();
+// Check session cu timeout
+const sessionTimeout = setTimeout(()=>{
+  show('viewLogin'); showForm('login');
+}, 3000);
+
+sb.auth.getSession().then(({ data:{ session } }) => {
+  clearTimeout(sessionTimeout);
   if(session && session.user){
     const u = session.user;
     renderPortal({
@@ -604,7 +608,10 @@ applyLang(det);
   } else {
     show('viewLogin'); showForm('login');
   }
-})();
+}).catch(()=>{
+  clearTimeout(sessionTimeout);
+  show('viewLogin'); showForm('login');
+});
 </script>
 </body>
 </html>
