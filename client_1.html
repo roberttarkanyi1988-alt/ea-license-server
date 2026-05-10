@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EA Strategies — Portal Client</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:#0a0c0f; --surface:#111318; --card:#161a22; --border:#1e2330;
+  --accent:#00e5a0; --accent2:#0066ff; --danger:#ff3d5a; --warn:#ffb800;
+  --text:#e8eaf0; --muted:#5a6070;
+  --mono:'JetBrains Mono',monospace; --sans:'Syne',sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;}
+
+/* NAV */
+nav{
+  position:fixed;top:0;left:0;right:0;z-index:200;
+  background:rgba(10,12,15,0.96);backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--border);
+  padding:0 32px;display:flex;align-items:center;justify-content:space-between;height:56px;
+}
+.logo{font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text);display:flex;align-items:center;gap:10px;text-decoration:none;}
+.logo-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent);animation:pulse 2s infinite;}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.5;transform:scale(.8);}}
+.nav-r{display:flex;align-items:center;gap:10px;}
+.lang-btn{padding:4px 11px;border-radius:20px;border:1px solid var(--border);font-size:11px;font-weight:700;cursor:pointer;font-family:var(--sans);background:transparent;color:var(--muted);transition:all .2s;}
+.lang-btn:hover{border-color:var(--accent);color:var(--accent);}
+.lang-btn.active{background:var(--accent);color:#000;border-color:var(--accent);}
+.btn-logout{padding:7px 16px;background:transparent;color:var(--muted);border:1px solid var(--border);border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--sans);transition:all .2s;}
+.btn-logout:hover{border-color:var(--danger);color:var(--danger);}
+
+/* MAIN */
+.main{max-width:900px;margin:0 auto;padding:80px 24px 60px;}
+
+/* WELCOME */
+.welcome{display:flex;align-items:center;justify-content:space-between;margin-bottom:32px;flex-wrap:wrap;gap:12px;}
+.welcome-left{display:flex;align-items:center;gap:14px;}
+.avatar{width:46px;height:46px;border-radius:50%;background:rgba(0,229,160,.15);border:1px solid rgba(0,229,160,.3);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:var(--accent);}
+.welcome-name{font-size:18px;font-weight:600;color:var(--text);margin-bottom:3px;}
+.welcome-plan{font-size:12px;color:var(--muted);font-family:var(--mono);}
+.plan-badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin-left:8px;}
+.plan-pro{background:rgba(0,229,160,.1);color:var(--accent);border:1px solid rgba(0,229,160,.2);}
+.plan-basic{background:rgba(0,102,255,.1);color:#4d9fff;border:1px solid rgba(0,102,255,.2);}
+.plan-full{background:rgba(255,184,0,.1);color:var(--warn);border:1px solid rgba(255,184,0,.2);}
+
+/* SECTION */
+.section-title{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:14px;display:flex;align-items:center;gap:8px;}
+.section-title::after{content:'';flex:1;height:1px;background:var(--border);}
+
+/* LICENSE CARDS */
+.licenses{display:flex;flex-direction:column;gap:12px;margin-bottom:32px;}
+.lic-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px 24px;}
+.lic-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
+.lic-name{font-size:15px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:8px;}
+.lic-name-dot{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 6px var(--accent);}
+.status-pill{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:3px 10px;border-radius:20px;}
+.status-active{background:rgba(0,229,160,.1);color:var(--accent);border:1px solid rgba(0,229,160,.2);}
+.status-expired{background:rgba(255,61,90,.1);color:var(--danger);border:1px solid rgba(255,61,90,.2);}
+.lic-rows{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;}
+.lic-row{background:var(--surface);border-radius:8px;padding:10px 14px;}
+.lic-row-label{font-size:10px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:3px;}
+.lic-row-val{font-family:var(--mono);font-size:13px;color:var(--text);}
+.prog-wrap{margin-top:4px;}
+.prog-bar{height:3px;background:var(--border);border-radius:2px;overflow:hidden;margin-top:6px;}
+.prog-fill{height:100%;background:var(--accent);border-radius:2px;transition:width .5s ease;}
+.prog-fill.warn{background:var(--warn);}
+.prog-fill.danger{background:var(--danger);}
+.prog-label{font-size:11px;color:var(--muted);margin-top:5px;font-family:var(--mono);}
+
+/* MT5 ACCOUNTS */
+.accounts-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px 24px;margin-bottom:32px;}
+.accounts-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
+.accounts-counter{font-family:var(--mono);font-size:12px;color:var(--muted);}
+.accounts-counter span{color:var(--accent);font-weight:700;}
+.acct-list{display:flex;flex-direction:column;gap:8px;}
+.acct-item{display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--surface);border-radius:8px;border:1px solid var(--border);}
+.acct-icon{width:32px;height:32px;border-radius:8px;background:rgba(0,102,255,.1);border:1px solid rgba(0,102,255,.2);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.acct-num{font-family:var(--mono);font-size:13px;color:var(--text);flex:1;}
+.acct-status{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);}
+.acct-remove{padding:4px 12px;border-radius:6px;border:1px solid var(--border);font-size:11px;cursor:pointer;font-family:var(--sans);background:transparent;color:var(--muted);transition:all .2s;}
+.acct-remove:hover{border-color:var(--danger);color:var(--danger);}
+.limit-banner{display:flex;align-items:center;gap:10px;padding:12px 16px;background:rgba(255,184,0,.06);border:1px solid rgba(255,184,0,.2);border-radius:8px;margin-top:10px;font-size:13px;color:var(--warn);}
+.add-acct-row{display:flex;gap:8px;margin-top:10px;}
+.add-acct-input{flex:1;padding:9px 13px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:13px;outline:none;transition:border-color .2s;}
+.add-acct-input:focus{border-color:var(--accent);}
+.add-acct-btn{padding:9px 18px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;font-family:var(--sans);font-size:12px;font-weight:700;cursor:pointer;transition:all .2s;}
+.add-acct-btn:hover{border-color:var(--accent);color:var(--accent);}
+.msg-ok{font-size:12px;color:var(--accent);margin-top:6px;display:none;font-family:var(--mono);}
+.msg-err{font-size:12px;color:var(--danger);margin-top:6px;display:none;font-family:var(--mono);}
+
+/* INVOICES */
+.invoices-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px 24px;margin-bottom:32px;}
+.invoice-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);}
+.invoice-row:last-child{border-bottom:none;}
+.invoice-date{font-size:13px;color:var(--text);}
+.invoice-plan{font-size:11px;color:var(--muted);font-family:var(--mono);margin-top:2px;}
+.invoice-amount{font-family:var(--mono);font-size:14px;color:var(--text);margin-right:14px;}
+.invoice-btn{padding:5px 12px;border-radius:6px;border:1px solid var(--border);font-size:11px;cursor:pointer;font-family:var(--sans);background:transparent;color:var(--muted);transition:all .2s;}
+.invoice-btn:hover{border-color:var(--accent);color:var(--accent);}
+
+/* ACTIONS */
+.actions-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:32px;}
+.action-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px 20px;cursor:pointer;transition:all .2s;text-decoration:none;display:block;}
+.action-card:hover{border-color:var(--accent);transform:translateY(-2px);}
+.action-icon{font-size:20px;margin-bottom:8px;}
+.action-title{font-size:13px;font-weight:600;color:var(--text);margin-bottom:3px;}
+.action-desc{font-size:12px;color:var(--muted);}
+
+/* DISCORD */
+.discord-card{background:linear-gradient(135deg,rgba(88,101,242,.1),rgba(0,229,160,.05));border:1px solid rgba(88,101,242,.3);border-radius:12px;padding:20px 24px;margin-bottom:32px;display:flex;align-items:center;gap:16px;}
+.discord-icon{font-size:28px;flex-shrink:0;}
+.discord-title{font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px;}
+.discord-desc{font-size:12px;color:var(--muted);line-height:1.5;}
+.discord-btn{margin-left:auto;padding:9px 20px;background:rgba(88,101,242,.2);color:#8b9cf4;border:1px solid rgba(88,101,242,.4);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:var(--sans);white-space:nowrap;transition:all .2s;text-decoration:none;}
+.discord-btn:hover{background:rgba(88,101,242,.35);}
+
+/* LOADING */
+.loading{display:flex;align-items:center;justify-content:center;min-height:60vh;flex-direction:column;gap:16px;}
+.spinner{width:36px;height:36px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.loading-text{font-family:var(--mono);font-size:13px;color:var(--muted);}
+
+/* LOGIN GATE */
+.login-gate{display:flex;align-items:center;justify-content:center;min-height:80vh;}
+.login-box{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:40px;width:100%;max-width:380px;text-align:center;}
+.login-title{font-size:20px;font-weight:600;margin-bottom:6px;}
+.login-sub{font-size:13px;color:var(--muted);margin-bottom:28px;}
+.form-group{margin-bottom:14px;text-align:left;}
+.form-label{display:block;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;}
+.form-input{width:100%;padding:10px 13px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:13px;outline:none;transition:border-color .2s;}
+.form-input:focus{border-color:var(--accent);}
+.form-btn{width:100%;padding:13px;background:var(--accent);color:#000;border:none;border-radius:8px;font-family:var(--sans);font-size:13px;font-weight:700;cursor:pointer;transition:all .2s;margin-top:4px;}
+.form-btn:hover{background:#00ffb3;}
+.form-err{font-size:12px;color:var(--danger);margin-top:8px;display:none;font-family:var(--mono);}
+.form-ok{font-size:12px;color:var(--accent);margin-top:8px;display:none;font-family:var(--mono);}
+.form-switch{text-align:center;margin-top:14px;font-size:12px;color:var(--muted);}
+.form-switch a{color:var(--accent);cursor:pointer;}
+.back-link{display:inline-block;margin-top:16px;font-size:12px;color:var(--muted);text-decoration:none;}
+.back-link:hover{color:var(--accent);}
+
+
+.btn-google {
+  width:100%; padding:12px;
+  background:var(--surface); color:var(--text);
+  border:1px solid var(--border); border-radius:8px;
+  font-family:var(--sans); font-size:13px; font-weight:600;
+  cursor:pointer; transition:all .2s;
+  display:flex; align-items:center; justify-content:center; gap:10px;
+  margin-bottom:16px;
+}
+.btn-google:hover { border-color:#4285f4; color:#4285f4; }
+.btn-google svg { flex-shrink:0; }
+.divider { display:flex; align-items:center; gap:12px; margin-bottom:16px; }
+.divider-line { flex:1; height:1px; background:var(--border); }
+.divider-text { font-size:11px; color:var(--muted); white-space:nowrap; }
+
+@media(max-width:600px){
+  nav{padding:0 16px;}
+  .main{padding:72px 16px 40px;}
+  .lic-rows{grid-template-columns:1fr;}
+  .discord-card{flex-wrap:wrap;}
+  .discord-btn{margin-left:0;}
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="/landing" class="logo"><div class="logo-dot"></div><span>EA Strategies</span></a>
+  <div class="nav-r">
+    <button class="lang-btn active" onclick="setLang('ro',this)">RO</button>
+    <button class="lang-btn" onclick="setLang('en',this)">EN</button>
+    <button class="lang-btn" onclick="setLang('de',this)">DE</button>
+    <button class="btn-logout" onclick="doLogout()" data-t="logout">Deconectare</button>
+  </div>
+</nav>
+
+<div class="main">
+
+  <!-- LOGIN GATE -->
+  <div id="loginGate" class="login-gate" style="display:none">
+    <div class="login-box">
+      <div id="vLogin">
+        <button class="btn-google" onclick="loginWithGoogle()">
+          <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+          <span data-t="google-btn">Continuă cu Google</span>
+        </button>
+        <div class="divider"><div class="divider-line"></div><div class="divider-text" data-t="or-divider">sau</div><div class="divider-line"></div></div>
+        <div class="login-title" data-t="lt">Intră în cont</div>
+        <div class="login-sub" data-t="ls">Accesează portalul tău de licențe</div>
+        <div class="form-group"><label class="form-label" data-t="le">Email</label><input class="form-input" type="email" id="lEmail" placeholder="email@exemplu.com"></div>
+        <div class="form-group"><label class="form-label" data-t="lp">Parolă</label><input class="form-input" type="password" id="lPass" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()"></div>
+        <div class="form-err" id="lErr"></div>
+        <div class="form-ok" id="lOk"></div>
+        <button class="form-btn" onclick="doLogin()" data-t="lb">Intră în cont</button>
+        <div class="form-switch"><span data-t="lna">Nu ai cont?</span> <a onclick="showView('register')" data-t="lr">Înregistrează-te</a></div>
+        <a href="/landing" class="back-link" data-t="back">← Înapoi la pagina principală</a>
+      </div>
+      <div id="vRegister" style="display:none">
+        <div class="login-title" data-t="rt">Cont nou</div>
+        <div class="login-sub" data-t="rs">Creează-ți contul de portal</div>
+        <div class="form-group"><label class="form-label" data-t="le">Email</label><input class="form-input" type="email" id="rEmail" placeholder="email@exemplu.com"></div>
+        <div class="form-group"><label class="form-label" data-t="lp">Parolă</label><input class="form-input" type="password" id="rPass" placeholder="Min. 8 caractere"></div>
+        <div class="form-group"><label class="form-label" data-t="rm">Număr cont MT5</label><input class="form-input" type="text" id="rMt5" placeholder="ex: 12345678"></div>
+        <div class="form-err" id="rErr"></div>
+        <div class="form-ok" id="rOk"></div>
+        <button class="form-btn" onclick="doRegister()" data-t="rb">Creează cont</button>
+        <div class="form-switch"><span data-t="rha">Ai deja cont?</span> <a onclick="showView('login')" data-t="rl">Intră în cont</a></div>
+        <a href="/landing" class="back-link" data-t="back">← Înapoi la pagina principală</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- LOADING -->
+  <div id="loadingState" class="loading">
+    <div class="spinner"></div>
+    <div class="loading-text" data-t="loading">Se încarcă portalul...</div>
+  </div>
+
+  <!-- PORTAL CONTENT -->
+  <div id="portalContent" style="display:none">
+
+    <!-- WELCOME -->
+    <div class="welcome">
+      <div class="welcome-left">
+        <div class="avatar" id="avatarInitials">IM</div>
+        <div>
+          <div class="welcome-name" id="welcomeName">Ion Mihailescu</div>
+          <div class="welcome-plan">
+            <span data-t="plan-label">Plan:</span>
+            <span id="planBadge" class="plan-badge plan-pro">Pro</span>
+            · <span data-t="member-since">client din</span> <span id="memberSince">Martie 2026</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- LICENSES -->
+    <div class="section-title" data-t="sec-lic">Licențele mele</div>
+    <div class="licenses" id="licenseList">
+      <!-- populated by JS -->
+    </div>
+
+    <!-- MT5 ACCOUNTS -->
+    <div class="section-title" data-t="sec-acct">Conturi MT5</div>
+    <div class="accounts-card">
+      <div class="accounts-header">
+        <div class="accounts-counter" data-t="acct-counter">Conturi folosite: <span id="acctCount">2</span> / <span id="acctMax">2</span></div>
+      </div>
+      <div class="acct-list" id="acctList"></div>
+      <div id="limitBanner" class="limit-banner" style="display:none">
+        ⚠ <span data-t="limit-msg">Ai atins limita de conturi MT5 pentru planul tău.</span>
+      </div>
+      <div id="addAcctRow" class="add-acct-row" style="display:none">
+        <input class="add-acct-input" type="text" id="newAcct" maxlength="12">
+        <button class="add-acct-btn" onclick="addAccount()" data-t="add-btn">+ Adaugă</button>
+      </div>
+      <div class="msg-ok" id="acctOk" data-t="acct-ok">Cont adăugat cu succes!</div>
+      <div class="msg-err" id="acctErr"></div>
+    </div>
+
+    <!-- DISCORD -->
+    <div class="discord-card">
+      <div class="discord-icon">💬</div>
+      <div>
+        <div class="discord-title" data-t="disc-title">Intră pe serverul Discord</div>
+        <div class="discord-desc" data-t="disc-desc">Accesează canalele VIP, găsești ghidul de VPS, suport direct și update-uri despre strategii.</div>
+      </div>
+      <a href="https://discord.gg/your-server" class="discord-btn" target="_blank" data-t="disc-btn">Intră pe Discord</a>
+    </div>
+
+    <!-- ACTIONS -->
+    <div class="section-title" data-t="sec-actions">Acțiuni rapide</div>
+    <div class="actions-row">
+      <div class="action-card" onclick="alert('Coming soon!')">
+        <div class="action-icon">⬇️</div>
+        <div class="action-title" data-t="act-dl">Descarcă EA-ul</div>
+        <div class="action-desc" data-t="act-dl-desc">Fișier .ex5 pentru MT5</div>
+      </div>
+      <div class="action-card" onclick="alert('Coming soon!')">
+        <div class="action-icon">💳</div>
+        <div class="action-title" data-t="act-pay">Metode de plată</div>
+        <div class="action-desc" data-t="act-pay-desc">Actualizează cardul salvat</div>
+      </div>
+      <div class="action-card" onclick="alert('Coming soon!')">
+        <div class="action-icon">📦</div>
+        <div class="action-title" data-t="act-plan">Schimbă planul</div>
+        <div class="action-desc" data-t="act-plan-desc">Upgrade sau downgrade</div>
+      </div>
+    </div>
+
+    <!-- INVOICES -->
+    <div class="section-title" data-t="sec-inv">Facturi</div>
+    <div class="invoices-card" id="invoiceList">
+      <!-- populated by JS -->
+    </div>
+
+  </div>
+</div>
+
+<script>
+const SERVER = 'https://ea-license-server-lrsl.onrender.com';
+const DEMO_USER = {
+  name: 'Ion Mihailescu',
+  email: 'ion@exemplu.com',
+  plan: 'pro',
+  memberSince: '',
+  accounts: ['12345678', '87654321'],
+  maxAccounts: 2,
+  licenses: [
+    { ea: 'EA Strategy 1', symbol: 'XAUUSD · M5', expires: '2026-06-09', daysLeft: 21, daysTotal: 30, active: true },
+    { ea: 'EA Strategy 3', symbol: 'GBPUSD · H4', expires: '2026-06-09', daysLeft: 21, daysTotal: 30, active: true }
+  ],
+  invoices: [
+    { date: 'Mai 2026', plan: 'Plan Pro', amount: '€45.00' },
+    { date: 'Apr 2026', plan: 'Plan Pro', amount: '€45.00' },
+    { date: 'Mar 2026', plan: 'Plan Pro', amount: '€45.00' }
+  ]
+};
+
+const T = {
+  ro: {
+    'logout':'Deconectare','google-btn':'Continuă cu Google','or-divider':'sau','google-btn':'Continuă cu Google','or-divider':'sau','lt':'Intră în cont','ls':'Accesează portalul tău de licențe',
+    'le':'Email','lp':'Parolă','lb':'Intră în cont','lna':'Nu ai cont?','lr':'Înregistrează-te',
+    'rt':'Cont nou','rs':'Creează-ți contul de portal','rm':'Număr cont MT5',
+    'rb':'Creează cont','rha':'Ai deja cont?','rl':'Intră în cont',
+    'back':'← Înapoi la pagina principală','loading':'Se încarcă portalul...',
+    'plan-label':'Plan','member-since':'client din',
+    'sec-lic':'Licențele mele','sec-acct':'Conturi MT5','sec-actions':'Acțiuni rapide','sec-inv':'Facturi',
+    'acct-counter':'Conturi folosite:','limit-msg':'Ai atins limita de conturi MT5 pentru planul tău.',
+    'add-btn':'+ Adaugă','acct-ok':'Cont adăugat cu succes!',
+    'acct-err-empty':'Introdu un număr de cont valid.','acct-err-exists':'Acest cont e deja adăugat.',
+    'acct-remove':'Elimină','confirm-remove':'Ești sigur că vrei să elimini contul ',
+    'disc-title':'Intră pe serverul Discord',
+    'disc-desc':'Accesează canalele VIP, găsești ghidul de VPS, suport direct și update-uri despre strategii.',
+    'disc-btn':'Intră pe Discord',
+    'act-dl':'Descarcă EA-ul','act-dl-desc':'Fișier .ex5 pentru MT5',
+    'act-pay':'Metode de plată','act-pay-desc':'Actualizează cardul salvat',
+    'act-plan':'Schimbă planul','act-plan-desc':'Upgrade sau downgrade',
+    'status-active':'Activ','status-expired':'Expirat',
+    'expires':'Expiră','account':'Cont MT5','autorenewal':'Reînnoire auto','autorenewal-val':'Da',
+    'days-left':'zile rămase din','inv-download':'PDF',
+    'login-err-empty':'Completează email și parola.','login-err-inv':'Email sau parolă incorectă.',
+    'reg-err-empty':'Completează toate câmpurile.','reg-ok':'Cont creat! Verifică emailul.',
+    'placeholder-acct':'Număr cont MT5...',
+    'plan-basic':'Basic','plan-pro':'Pro','plan-full':'Full Access'
+  },
+  en: {
+    'logout':'Sign out','google-btn':'Continue with Google','or-divider':'or','lt':'Sign in','ls':'Access your license portal',
+    'le':'Email','lp':'Password','lb':'Sign in','lna':'No account?','lr':'Register',
+    'rt':'New account','rs':'Create your portal account','rm':'MT5 account number',
+    'rb':'Create account','rha':'Already have an account?','rl':'Sign in',
+    'back':'← Back to main page','loading':'Loading portal...',
+    'plan-label':'Plan','member-since':'member since',
+    'sec-lic':'My licenses','sec-acct':'MT5 accounts','sec-actions':'Quick actions','sec-inv':'Invoices',
+    'acct-counter':'Accounts used:','limit-msg':'You have reached the MT5 account limit for your plan.',
+    'add-btn':'+ Add','acct-ok':'Account added successfully!',
+    'acct-err-empty':'Enter a valid account number.','acct-err-exists':'This account is already added.',
+    'acct-remove':'Remove','confirm-remove':'Are you sure you want to remove account ',
+    'disc-title':'Join the Discord server',
+    'disc-desc':'Access VIP channels, find the VPS guide, direct support and strategy updates.',
+    'disc-btn':'Join Discord',
+    'act-dl':'Download EA','act-dl-desc':'.ex5 file for MT5',
+    'act-pay':'Payment methods','act-pay-desc':'Update your saved card',
+    'act-plan':'Change plan','act-plan-desc':'Upgrade or downgrade',
+    'status-active':'Active','status-expired':'Expired',
+    'expires':'Expires','account':'MT5 account','autorenewal':'Auto-renewal','autorenewal-val':'Yes',
+    'days-left':'days left of','inv-download':'PDF',
+    'login-err-empty':'Please enter email and password.','login-err-inv':'Incorrect email or password.',
+    'reg-err-empty':'Please fill in all fields.','reg-ok':'Account created! Check your email.',
+    'placeholder-acct':'MT5 account number...',
+    'plan-basic':'Basic','plan-pro':'Pro','plan-full':'Full Access'
+  },
+  de: {
+    'logout':'Abmelden','google-btn':'Mit Google fortfahren','or-divider':'oder','lt':'Anmelden','ls':'Zugriff auf Ihr Lizenz-Portal',
+    'le':'E-Mail','lp':'Passwort','lb':'Anmelden','lna':'Kein Konto?','lr':'Registrieren',
+    'rt':'Neues Konto','rs':'Erstellen Sie Ihr Portal-Konto','rm':'MT5-Kontonummer',
+    'rb':'Konto erstellen','rha':'Bereits ein Konto?','rl':'Anmelden',
+    'back':'← Zurück zur Hauptseite','loading':'Portal wird geladen...',
+    'plan-label':'Plan','member-since':'Mitglied seit',
+    'sec-lic':'Meine Lizenzen','sec-acct':'MT5-Konten','sec-actions':'Schnellaktionen','sec-inv':'Rechnungen',
+    'acct-counter':'Konten genutzt:','limit-msg':'Sie haben das MT5-Kontolimit für Ihren Plan erreicht.',
+    'add-btn':'+ Hinzufügen','acct-ok':'Konto erfolgreich hinzugefügt!',
+    'acct-err-empty':'Geben Sie eine gültige Kontonummer ein.','acct-err-exists':'Dieses Konto ist bereits hinzugefügt.',
+    'acct-remove':'Entfernen','confirm-remove':'Möchten Sie das Konto wirklich entfernen ',
+    'disc-title':'Discord-Server beitreten',
+    'disc-desc':'Zugang zu VIP-Kanälen, VPS-Leitfaden, direktem Support und Strategie-Updates.',
+    'disc-btn':'Discord beitreten',
+    'act-dl':'EA herunterladen','act-dl-desc':'.ex5-Datei für MT5',
+    'act-pay':'Zahlungsmethoden','act-pay-desc':'Gespeicherte Karte aktualisieren',
+    'act-plan':'Plan ändern','act-plan-desc':'Upgrade oder Downgrade',
+    'status-active':'Aktiv','status-expired':'Abgelaufen',
+    'expires':'Läuft ab','account':'MT5-Konto','autorenewal':'Auto-Verlängerung','autorenewal-val':'Ja',
+    'days-left':'Tage verbleibend von','inv-download':'PDF',
+    'login-err-empty':'Bitte E-Mail und Passwort eingeben.','login-err-inv':'Falsche E-Mail oder Passwort.',
+    'reg-err-empty':'Bitte alle Felder ausfüllen.','reg-ok':'Konto erstellt! Überprüfen Sie Ihre E-Mail.',
+    'placeholder-acct':'MT5-Kontonummer...',
+    'plan-basic':'Basic','plan-pro':'Pro','plan-full':'Full Access'
+  }
+};
+
+let lang = 'ro';
+let user = null;
+let accounts = [];
+let maxAccounts = 2;
+
+function detectLang(){const bl=(navigator.language||'en').toLowerCase().substring(0,2);return ['ro','en','de'].includes(bl)?bl:'en';}
+
+function applyLang(l){
+  lang=l;const t=T[l];
+  document.querySelectorAll('[data-t]').forEach(el=>{const k=el.getAttribute('data-t');if(t[k]!==undefined)el.textContent=t[k];});
+  const inp=document.getElementById('newAcct');
+  if(inp) inp.placeholder=t['placeholder-acct']||'MT5...';
+}
+
+function setLang(l,el){
+  document.querySelectorAll('.lang-btn').forEach(b=>b.classList.remove('active'));
+  el.classList.add('active');applyLang(l);
+  renderPortal();
+}
+
+function showView(v){
+  document.getElementById('vLogin').style.display=v==='login'?'block':'none';
+  document.getElementById('vRegister').style.display=v==='register'?'block':'none';
+}
+
+// RENDER PORTAL
+function renderPortal(){
+  const t=T[lang];
+  const u=user||DEMO_USER;
+  // Ensure accounts and invoices are always populated
+  if (!u.accounts) u.accounts = DEMO_USER.accounts;
+  if (!u.invoices) u.invoices = DEMO_USER.invoices;
+  if (!u.maxAccounts) u.maxAccounts = DEMO_USER.maxAccounts;
+  if (!u.licenses) u.licenses = DEMO_USER.licenses;
+
+  // Avatar & name
+  const initials=u.name.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase();
+  document.getElementById('avatarInitials').textContent=initials;
+  document.getElementById('welcomeName').textContent=u.name;
+
+  // Plan badge
+  const badge=document.getElementById('planBadge');
+  badge.textContent=t['plan-'+u.plan]||u.plan;
+  badge.className='plan-badge plan-'+u.plan;
+
+  // Member since
+  if(u.memberSince) document.getElementById('memberSince').textContent=u.memberSince;
+
+  // Licenses
+  const licList=document.getElementById('licenseList');
+  licList.innerHTML='';
+  u.licenses.forEach(lic=>{
+    const pct=Math.round((lic.daysLeft/lic.daysTotal)*100);
+    const fillClass=pct>50?'':pct>20?'warn':'danger';
+    licList.innerHTML+=`
+      <div class="lic-card">
+        <div class="lic-header">
+          <div class="lic-name"><div class="lic-name-dot"></div>${lic.ea} <span style="font-size:12px;color:var(--muted);font-family:var(--mono);font-weight:400">· ${lic.symbol}</span></div>
+          <span class="status-pill ${lic.active?'status-active':'status-expired'}">${lic.active?t['status-active']:t['status-expired']}</span>
+        </div>
+        <div class="lic-rows">
+          <div class="lic-row"><div class="lic-row-label">${t['expires']}</div><div class="lic-row-val">${lic.expires}</div></div>
+          <div class="lic-row"><div class="lic-row-label">${t['autorenewal']}</div><div class="lic-row-val">${t['autorenewal-val']} ✓</div></div>
+        </div>
+        <div class="prog-wrap">
+          <div class="prog-bar"><div class="prog-fill ${fillClass}" style="width:${pct}%"></div></div>
+          <div class="prog-label">${lic.daysLeft} ${t['days-left']} ${lic.daysTotal}</div>
+        </div>
+      </div>`;
+  });
+
+  // Accounts
+  accounts=u.accounts?[...u.accounts]:[];
+  maxAccounts=u.maxAccounts||2;
+  renderAccounts();
+
+  // Invoices
+  const invList=document.getElementById('invoiceList');
+  invList.innerHTML='';
+  u.invoices.forEach(inv=>{
+    invList.innerHTML+=`
+      <div class="invoice-row">
+        <div><div class="invoice-date">${inv.date}</div><div class="invoice-plan">${inv.plan}</div></div>
+        <div style="display:flex;align-items:center">
+          <div class="invoice-amount">${inv.amount}</div>
+          <button class="invoice-btn">${t['inv-download']}</button>
+        </div>
+      </div>`;
+  });
+}
+
+function renderAccounts(){
+  const t=T[lang];
+  document.getElementById('acctCount').textContent=accounts.length;
+  document.getElementById('acctMax').textContent=maxAccounts;
+  const list=document.getElementById('acctList');
+  list.innerHTML='';
+  accounts.forEach(acct=>{
+    list.innerHTML+=`
+      <div class="acct-item" data-id="${acct}">
+        <div class="acct-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4d9fff" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></div>
+        <div class="acct-num">${acct}</div>
+        <div class="acct-status">✓</div>
+        <button class="acct-remove" onclick="removeAccount('${acct}')">${t['acct-remove']}</button>
+      </div>`;
+  });
+  const limitBanner=document.getElementById('limitBanner');
+  const addRow=document.getElementById('addAcctRow');
+  if(accounts.length>=maxAccounts){limitBanner.style.display='flex';addRow.style.display='none';}
+  else{limitBanner.style.display='none';addRow.style.display='flex';}
+}
+
+function addAccount(){
+  const t=T[lang];
+  const val=document.getElementById('newAcct').value.trim();
+  const ok=document.getElementById('acctOk');
+  const err=document.getElementById('acctErr');
+  ok.style.display='none';err.style.display='none';
+  if(!val||val.length<5){err.textContent=t['acct-err-empty'];err.style.display='block';return;}
+  if(accounts.includes(val)){err.textContent=t['acct-err-exists'];err.style.display='block';return;}
+  accounts.push(val);
+  document.getElementById('newAcct').value='';
+  ok.textContent=t['acct-ok'];ok.style.display='block';
+  setTimeout(()=>ok.style.display='none',3000);
+  renderAccounts();
+}
+
+function removeAccount(id){
+  const t=T[lang];
+  if(!confirm(t['confirm-remove']+id+'?'))return;
+  accounts=accounts.filter(a=>a!==id);
+  renderAccounts();
+}
+
+function doLogin(){
+  const t=T[lang];
+  const email=document.getElementById('lEmail').value.trim();
+  const pass=document.getElementById('lPass').value;
+  const err=document.getElementById('lErr');
+  const ok=document.getElementById('lOk');
+  err.style.display='none';ok.style.display='none';
+  if(!email||!pass){err.textContent=t['login-err-empty'];err.style.display='block';return;}
+  ok.textContent='Se conectează...';ok.style.display='block';
+  // Demo: simulam login
+  setTimeout(()=>{
+    user={...DEMO_USER,email:email};
+    sessionStorage.setItem('ea_user',JSON.stringify(user));
+    showPortal();
+  },1000);
+}
+
+function doRegister(){
+  const t=T[lang];
+  const email=document.getElementById('rEmail').value.trim();
+  const pass=document.getElementById('rPass').value;
+  const mt5=document.getElementById('rMt5').value.trim();
+  const err=document.getElementById('rErr');
+  const ok=document.getElementById('rOk');
+  err.style.display='none';ok.style.display='none';
+  if(!email||!pass||!mt5){err.textContent=t['reg-err-empty'];err.style.display='block';return;}
+  ok.textContent=t['reg-ok'];ok.style.display='block';
+}
+
+function doLogout(){
+  sessionStorage.removeItem('ea_user');
+  user=null;
+  showLogin();
+}
+
+function showPortal(){
+  document.getElementById('loginGate').style.display='none';
+  document.getElementById('loadingState').style.display='none';
+  document.getElementById('portalContent').style.display='block';
+  renderPortal();
+}
+
+function showLogin(){
+  document.getElementById('loginGate').style.display='flex';
+  document.getElementById('loadingState').style.display='none';
+  document.getElementById('portalContent').style.display='none';
+  showView('login');
+}
+
+
+// Supabase init
+const SUPABASE_URL = 'https://cxtbthwoffyeazlxzequ.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_mFCIzSx4s7dGbQKRhJchLQ_fv9bSu38';
+const sbClient = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+
+async function loginWithGoogle() {
+  if (!sbClient) { alert('Supabase nu e disponibil.'); return; }
+  const { error } = await sbClient.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo: window.location.origin + '/client'
+    }
+  });
+  if (error) alert('Eroare Google Login: ' + error.message);
+}
+
+// Check Supabase session on load
+async function checkSupabaseSession() {
+  if (!sbClient) return false;
+  const { data: { session } } = await sbClient.auth.getSession();
+  if (session && session.user) {
+    user = {
+      ...DEMO_USER,
+      name: session.user.user_metadata?.full_name || session.user.email,
+      email: session.user.email,
+      accounts: DEMO_USER.accounts,
+      invoices: DEMO_USER.invoices,
+      licenses: DEMO_USER.licenses,
+      maxAccounts: DEMO_USER.maxAccounts,
+      plan: DEMO_USER.plan,
+      memberSince: DEMO_USER.memberSince
+    };
+    sessionStorage.setItem('ea_user', JSON.stringify(user));
+    return true;
+  }
+  return false;
+}
+
+// INIT
+const det=detectLang();
+const btns=document.querySelectorAll('.lang-btn');
+btns.forEach(b=>b.classList.remove('active'));
+const bmap={'ro':0,'en':1,'de':2};
+if(btns[bmap[det]])btns[bmap[det]].classList.add('active');
+applyLang(det);
+
+// Check session
+setTimeout(async ()=>{
+  const saved=sessionStorage.getItem('ea_user');
+  if(saved){user=JSON.parse(saved);showPortal();return;}
+  const hasSession = await checkSupabaseSession();
+  if(hasSession){showPortal();}
+  else{showLogin();}
+},600);
+</script>
+</body>
+</html>
