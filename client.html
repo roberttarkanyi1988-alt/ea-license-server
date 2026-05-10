@@ -594,7 +594,7 @@ async function loginWithGoogle() {
   const { error } = await sbClient.auth.signInWithOAuth({
     provider: 'google',
     options: {
-      redirectTo: 'https://ea-license-server-lrsl.onrender.com/client'
+      redirectTo: window.location.origin + '/client'
     }
   });
   if (error) alert('Eroare Google Login: ' + error.message);
