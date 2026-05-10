@@ -495,6 +495,88 @@ async function doLogout(){
   show('viewLogin'); showForm('login');
 }
 
+
+// ── PDF FACTURA CLIENT ────────────────────────────────────────────────────────
+function generateInvoicePDF(date, plan, amount, userName, userEmail) {
+  const win = window.open('', '_blank');
+  win.document.write(`<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Factura ${date}</title>
+<style>
+  body { font-family: Arial, sans-serif; padding: 40px; color: #1a1a1a; max-width: 700px; margin: 0 auto; }
+  .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 40px; border-bottom: 2px solid #00e5a0; padding-bottom: 20px; }
+  .company { font-size: 22px; font-weight: 800; color: #0a0c0f; }
+  .company-sub { font-size: 12px; color: #666; margin-top: 4px; }
+  .invoice-title { font-size: 28px; font-weight: 700; color: #0a0c0f; text-align: right; }
+  .invoice-num { font-size: 12px; color: #666; text-align: right; }
+  .info-section { display: flex; justify-content: space-between; margin-bottom: 40px; }
+  .info-block h4 { font-size: 11px; text-transform: uppercase; color: #999; letter-spacing: 1px; margin-bottom: 8px; }
+  .info-block p { font-size: 14px; color: #1a1a1a; margin: 2px 0; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+  th { background: #0a0c0f; color: #fff; padding: 12px 16px; text-align: left; font-size: 12px; text-transform: uppercase; }
+  td { padding: 14px 16px; border-bottom: 1px solid #eee; font-size: 14px; }
+  .total-row { background: #f8f8f8; font-weight: 700; }
+  .total-amount { font-size: 18px; color: #0a0c0f; }
+  .footer { text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #eee; font-size: 11px; color: #999; }
+  .badge { display: inline-block; background: #00e5a0; color: #000; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; }
+  @media print { body { padding: 20px; } }
+</style>
+</head>
+<body>
+<div class="header">
+  <div>
+    <div class="company">EA Strategies</div>
+    <div class="company-sub">Trading Automatizat Profesional</div>
+    <div class="company-sub">ea-license-server-lrsl.onrender.com</div>
+  </div>
+  <div>
+    <div class="invoice-title">FACTURĂ</div>
+    <div class="invoice-num">Data: ${date}</div>
+    <div class="invoice-num"><span class="badge">Plătit</span></div>
+  </div>
+</div>
+<div class="info-section">
+  <div class="info-block">
+    <h4>Emis de</h4>
+    <p><strong>EA Strategies</strong></p>
+    <p>Trading Automatizat MT5</p>
+    <p>contact@ea-strategies.com</p>
+  </div>
+  <div class="info-block">
+    <h4>Facturat către</h4>
+    <p><strong>${userName || 'Client'}</strong></p>
+    <p>${userEmail || ''}</p>
+  </div>
+</div>
+<table>
+  <thead>
+    <tr><th>Descriere</th><th>Perioadă</th><th>Total</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>${plan}</strong><br><span style="font-size:12px;color:#666">Abonament EA Strategies — acces strategii MT5</span></td>
+      <td>${date}</td>
+      <td>${amount}</td>
+    </tr>
+    <tr class="total-row">
+      <td colspan="2" style="text-align:right;font-size:13px;">TOTAL</td>
+      <td class="total-amount">${amount}</td>
+    </tr>
+  </tbody>
+</table>
+<div class="footer">
+  <p>EA Strategies — Abonament reînnoit automat lunar</p>
+  <p>Pentru întrebări: contact@ea-strategies.com</p>
+  <p style="margin-top:8px;color:#ccc">Acest document a fost generat automat</p>
+</div>
+<scr"+"ipt>window.onload = function(){ window.print(); }</scr"+"ipt>
+</body>
+</html>`);
+  win.document.close();
+}
+
 // ── INIT ──────────────────────────────────────────────────────────────────────
 const det = detectLang();
 const btns = document.querySelectorAll('.lang-btn');
