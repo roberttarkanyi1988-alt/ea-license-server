@@ -16,6 +16,10 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 // ─── Admin Panel ──────────────────────────────────────────────────────────────
 const ADMIN_KEY = process.env.ADMIN_KEY || 'schimba-aceasta-cheie-secreta';
 
+app.get('/client', (req, res) => {
+  res.sendFile(path.join(__dirname, 'client.html'));
+});
+
 app.get('/landing', (req, res) => {
   res.sendFile(path.join(__dirname, 'landing.html'));
 });
