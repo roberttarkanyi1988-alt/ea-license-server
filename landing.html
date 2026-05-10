@@ -19,7 +19,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);overflow-x:h
 
 /* NAV */
 nav{
-  position:fixed;top:0;left:0;right:0;z-index:200;
+  position:sticky;top:0;left:0;right:0;z-index:200;
   background:rgba(10,12,15,0.96);backdrop-filter:blur(12px);
   border-bottom:1px solid var(--border);
   padding:0 40px;display:flex;align-items:center;justify-content:space-between;height:58px;
@@ -169,34 +169,33 @@ footer a{color:var(--accent);text-decoration:none;}
 
 /* RISK BANNER */
 .risk-banner {
-  background: rgba(255,184,0,0.06);
-  border-bottom: 1px solid rgba(255,184,0,0.2);
-  padding: 10px 32px;
+  background: rgba(255,184,0,0.08);
+  border-bottom: 1px solid rgba(255,184,0,0.25);
+  padding: 12px 32px;
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  font-size: 12px;
-  color: #b8860b;
-  line-height: 1.5;
-  position: fixed;
-  top: 56px;
-  left: 0; right: 0;
-  z-index: 190;
+  font-size: 14px;
+  color: #c8960b;
+  line-height: 1.6;
+  position: relative;
+  z-index: 300;
+  width: 100%;
 }
 .risk-banner-icon { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
 .risk-banner-text { flex: 1; }
 .risk-banner-text b { color: var(--warn); }
 .risk-footer {
-  border-top: 1px solid var(--border);
-  background: var(--surface);
-  padding: 20px 32px;
-  font-size: 11px;
-  color: var(--muted);
+  border-top: 1px solid rgba(255,184,0,0.2);
+  background: rgba(255,184,0,0.04);
+  padding: 18px 32px;
+  font-size: 13px;
+  color: #a89060;
   font-family: var(--mono);
-  line-height: 1.6;
+  line-height: 1.7;
   text-align: center;
 }
-.risk-footer b { color: rgba(255,184,0,0.7); }
+.risk-footer b { color: var(--warn); font-size: 14px; }
 
 @media(max-width:768px){
   nav{padding:0 16px;}
@@ -208,6 +207,14 @@ footer a{color:var(--accent);text-decoration:none;}
 </style>
 </head>
 <body>
+
+<!-- RISK BANNER -->
+<div class="risk-banner" id="riskBanner">
+  <div class="risk-banner-icon">⚠️</div>
+  <div class="risk-banner-text" id="riskBannerText">
+    <b>Avertisment de risc:</b> Trading-ul pe piețele financiare implică riscuri semnificative și poți pierde integral capitalul investit. EA-urile noastre sunt instrumente automate — nu consiliere financiară. Rezultatele trecute nu garantează performanțe viitoare. Tranzacționează doar cu bani pe care îți permiți să îi pierzi.
+  </div>
+</div>
 
 <nav>
   <div class="logo"><div class="logo-dot"></div><span>EA Strategies</span></div>
