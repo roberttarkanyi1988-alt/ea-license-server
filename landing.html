@@ -19,7 +19,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);overflow-x:h
 
 /* NAV */
 nav{
-  position:sticky;top:0;left:0;right:0;z-index:200;
+  position:fixed;top:0;left:0;right:0;z-index:200;
   background:rgba(10,12,15,0.96);backdrop-filter:blur(12px);
   border-bottom:1px solid var(--border);
   padding:0 40px;display:flex;align-items:center;justify-content:space-between;height:58px;
@@ -168,23 +168,7 @@ footer a{color:var(--accent);text-decoration:none;}
 
 
 /* RISK BANNER */
-.risk-banner {
-  background: rgba(255,184,0,0.08);
-  border-bottom: 1px solid rgba(255,184,0,0.25);
-  padding: 12px 32px;
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  font-size: 14px;
-  color: #c8960b;
-  line-height: 1.6;
-  position: relative;
-  z-index: 300;
-  width: 100%;
-}
-.risk-banner-icon { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
-.risk-banner-text { flex: 1; }
-.risk-banner-text b { color: var(--warn); }
+
 .risk-footer {
   border-top: 1px solid rgba(255,184,0,0.2);
   background: rgba(255,184,0,0.04);
@@ -197,6 +181,26 @@ footer a{color:var(--accent);text-decoration:none;}
 }
 .risk-footer b { color: var(--warn); font-size: 14px; }
 
+
+/* RISK HERO NOTICE */
+.risk-notice {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255,184,0,0.08);
+  border: 1px solid rgba(255,184,0,0.25);
+  border-radius: 8px;
+  padding: 10px 18px;
+  font-size: 13px;
+  color: #c8960b;
+  line-height: 1.5;
+  max-width: 680px;
+  margin-bottom: 28px;
+  text-align: left;
+}
+.risk-notice-icon { font-size: 16px; flex-shrink: 0; }
+.risk-notice b { color: var(--warn); }
+
 @media(max-width:768px){
   nav{padding:0 16px;}
   .nav-c{display:none;}
@@ -207,14 +211,6 @@ footer a{color:var(--accent);text-decoration:none;}
 </style>
 </head>
 <body>
-
-<!-- RISK BANNER -->
-<div class="risk-banner" id="riskBanner">
-  <div class="risk-banner-icon">⚠️</div>
-  <div class="risk-banner-text" id="riskBannerText">
-    <b>Avertisment de risc:</b> Trading-ul pe piețele financiare implică riscuri semnificative și poți pierde integral capitalul investit. EA-urile noastre sunt instrumente automate — nu consiliere financiară. Rezultatele trecute nu garantează performanțe viitoare. Tranzacționează doar cu bani pe care îți permiți să îi pierzi.
-  </div>
-</div>
 
 <nav>
   <div class="logo"><div class="logo-dot"></div><span>EA Strategies</span></div>
@@ -232,6 +228,10 @@ footer a{color:var(--accent);text-decoration:none;}
 </nav>
 
 <div class="hero">
+  <div class="risk-notice">
+    <span class="risk-notice-icon">⚠️</span>
+    <span id="riskBannerText"><b>Avertisment de risc:</b> Trading-ul implică riscuri semnificative. Poți pierde integral capitalul investit. Rezultatele trecute nu garantează performanțe viitoare.</span>
+  </div>
   <h1 class="hero-title">
     <span data-t="ht1">Trading automatizat</span><br>
     <span class="accent" data-t="ht2">la nivel profesional</span>
