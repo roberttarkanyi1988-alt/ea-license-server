@@ -14,15 +14,20 @@ app.use(express.json());
 // ─── Stripe Setup ─────────────────────────────────────────────────────────────
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
-// ─── Admin Panel ──────────────────────────────────────────────────────────────
+// ─── Admin Key ────────────────────────────────────────────────────────────────
 const ADMIN_KEY = process.env.ADMIN_KEY || 'schimba-aceasta-cheie-secreta';
 
-app.get('/client', (req, res) => {
-  res.sendFile(path.join(__dirname, 'client.html'));
+// ─── ROUTES ───────────────────────────────────────────────────────────────────
+app.get('/', (req, res) => {
+  res.redirect('/landing');
 });
 
 app.get('/landing', (req, res) => {
   res.sendFile(path.join(__dirname, 'landing.html'));
+});
+
+app.get('/client', (req, res) => {
+  res.sendFile(path.join(__dirname, 'client.html'));
 });
 
 app.get('/admin', (req, res) => {
@@ -35,7 +40,7 @@ app.get('/admin-panel', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// ─── Database Setup (Supabase PostgreSQL) ─────────────────────────────────────
+// ─── Database Setup ───────────────────────────────────────────────────────────
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
@@ -66,7 +71,7 @@ async function initDB() {
 
 initDB().catch(console.error);
 
-// ─── Telegram Notifications ───────────────────────────────────────────────────
+// ─── Telegram ─────────────────────────────────────────────────────────────────
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID   = process.env.TELEGRAM_CHAT_ID;
 
@@ -169,8 +174,6 @@ async function checkExpiringLicenses() {
         `📅 Expiră: ${row.expires_at}`
       );
     }
-
-    // Sterge roluri Discord pentru licente expirate
     const expired = await pool.query(`
       SELECT * FROM licenses WHERE status = 'active' AND expires_at::date < CURRENT_DATE
     `);
@@ -192,14 +195,14 @@ setInterval(() => {
 const limiter = rateLimit({ windowMs: 60 * 1000, max: 30, message: 'RATE_LIMITED' });
 app.use('/api/', limiter);
 
-// ─── Middleware: Admin Auth ───────────────────────────────────────────────────
+// ─── Admin Auth ───────────────────────────────────────────────────────────────
 function adminAuth(req, res, next) {
   const key = req.headers['x-admin-key'];
   if (!key || key !== ADMIN_KEY) return res.status(401).json({ error: 'Unauthorized' });
   next();
 }
 
-// ─── ENDPOINT: Verificare licență ────────────────────────────────────────────
+// ─── Verificare licență ───────────────────────────────────────────────────────
 app.get('/api/check', async (req, res) => {
   const { account } = req.query;
   const ip = req.ip;
@@ -224,11 +227,10 @@ app.get('/api/check', async (req, res) => {
   return res.send(`VALID|${row.expires_at}|${daysLeft}`);
 });
 
-// ─── STRIPE: Creare link de plată ─────────────────────────────────────────────
+// ─── Stripe: Creare link plată ────────────────────────────────────────────────
 app.post('/api/create-payment', async (req, res) => {
   const { account_id, email, months = 1 } = req.body;
   if (!account_id) return res.status(400).json({ error: 'account_id required' });
-
   try {
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
@@ -246,26 +248,22 @@ app.post('/api/create-payment', async (req, res) => {
   }
 });
 
-// ─── STRIPE: Webhook ──────────────────────────────────────────────────────────
+// ─── Stripe: Webhook ──────────────────────────────────────────────────────────
 app.post('/webhook', async (req, res) => {
   const sig = req.headers['stripe-signature'];
   let event;
-
   try {
     event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
   } catch(e) {
-    console.error('Webhook error:', e.message);
     return res.status(400).send(`Webhook Error: ${e.message}`);
   }
 
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
     const { account_id, months, email } = session.metadata;
-
     const base = new Date();
     base.setDate(base.getDate() + (parseInt(months) * 30));
     const expiresAt = base.toISOString().split('T')[0];
-
     await pool.query(`
       INSERT INTO licenses (account_id, email, plan, status, expires_at, notes)
       VALUES ($1,$2,'monthly','active',$3,'Plată Stripe automată')
@@ -273,13 +271,8 @@ app.post('/webhook', async (req, res) => {
         email=excluded.email, status='active',
         expires_at=excluded.expires_at, notes=excluded.notes
     `, [account_id, email, expiresAt]);
-
-    // Adauga rol Discord automat
     if (email) await addDiscordRole(email, 'basic');
-
-    await sendTelegram(
-      `💳 <b>Plată primită!</b>\n👤 Cont: <b>#${account_id}</b>\n📧 Email: ${email || 'nespecificat'}\n📅 Activ până: ${expiresAt}`
-    );
+    await sendTelegram(`💳 <b>Plată primită!</b>\n👤 Cont: <b>#${account_id}</b>\n📧 Email: ${email || 'nespecificat'}\n📅 Activ până: ${expiresAt}`);
   }
 
   if (event.type === 'customer.subscription.deleted' || event.type === 'invoice.payment_failed') {
@@ -288,24 +281,21 @@ app.post('/webhook', async (req, res) => {
     if (email) {
       await removeDiscordRole(email);
       await pool.query("UPDATE licenses SET status='expired' WHERE email=$1", [email]);
-      await sendTelegram(`❌ <b>Abonament anulat/expirat!</b>\n📧 Email: ${email}`);
+      await sendTelegram(`❌ <b>Abonament anulat!</b>\n📧 Email: ${email}`);
     }
   }
 
   res.json({ received: true });
 });
 
-// ─── DISCORD: Adauga rol manual ───────────────────────────────────────────────
+// ─── Discord manual ───────────────────────────────────────────────────────────
 app.post('/discord/add-role', adminAuth, async (req, res) => {
-  const { email, plan } = req.body;
-  const result = await addDiscordRole(email, plan);
+  const result = await addDiscordRole(req.body.email, req.body.plan);
   res.json({ success: result });
 });
 
-// ─── DISCORD: Sterge rol manual ───────────────────────────────────────────────
 app.post('/discord/remove-role', adminAuth, async (req, res) => {
-  const { email } = req.body;
-  const result = await removeDiscordRole(email);
+  const result = await removeDiscordRole(req.body.email);
   res.json({ success: result });
 });
 
@@ -313,7 +303,7 @@ app.post('/discord/remove-role', adminAuth, async (req, res) => {
 app.get('/payment-success', (req, res) => {
   res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:50px;background:#0a0c0f;color:#e8eaf0;">
     <h1 style="color:#00e5a0;">✅ Plată reușită!</h1>
-    <p>Abonamentul tău a fost activat. Poți închide această pagină.</p>
+    <p>Abonamentul tău a fost activat.</p>
     <a href="/client" style="color:#00e5a0;">Mergi la portal →</a>
   </body></html>`);
 });
@@ -321,15 +311,13 @@ app.get('/payment-success', (req, res) => {
 app.get('/payment-cancel', (req, res) => {
   res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:50px;background:#0a0c0f;color:#e8eaf0;">
     <h1 style="color:#ff3d5a;">❌ Plată anulată</h1>
-    <p>Plata a fost anulată. Contactează-ne pentru asistență.</p>
-    <a href="/landing" style="color:#00e5a0;">Înapoi la pagina principală →</a>
+    <a href="/landing" style="color:#00e5a0;">Înapoi →</a>
   </body></html>`);
 });
 
 // ─── Check Status ─────────────────────────────────────────────────────────────
 app.get('/check-status', async (req, res) => {
   const { account } = req.query;
-
   if (!account) {
     return res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:50px;background:#0a0c0f;color:#e8eaf0;">
       <h2>Verifică abonamentul tău</h2>
@@ -340,45 +328,31 @@ app.get('/check-status', async (req, res) => {
       </form>
     </body></html>`);
   }
-
   const result = await pool.query('SELECT * FROM licenses WHERE account_id=$1', [account]);
   const row = result.rows[0];
-
-  if (!row) {
-    return res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:50px;background:#0a0c0f;color:#e8eaf0;">
-      <h1 style="color:#ff3d5a;">❌ Cont negăsit</h1>
-      <p>Contul #${account} nu are licență activă.</p>
-      <a href="/check-status" style="color:#00e5a0;">Încearcă din nou</a>
-    </body></html>`);
-  }
-
+  if (!row) return res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:50px;background:#0a0c0f;color:#e8eaf0;"><h1 style="color:#ff3d5a;">❌ Cont negăsit</h1><a href="/check-status" style="color:#00e5a0;">Încearcă din nou</a></body></html>`);
   const now = new Date();
   const expiry = new Date(row.expires_at);
   const daysLeft = Math.ceil((expiry - now) / 86400000);
   const statusColor = row.status === 'active' ? '#00e5a0' : '#ff3d5a';
   const statusText = row.status === 'active' ? '✅ Activ' : row.status === 'suspended' ? '⏸ Suspendat' : '❌ Expirat';
-
   res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:50px;background:#0a0c0f;color:#e8eaf0;">
     <h1 style="color:${statusColor};">${statusText}</h1>
     <div style="background:#161a22;border:1px solid #1e2330;border-radius:16px;padding:32px;max-width:400px;margin:0 auto;">
       <p><b>Cont MT5:</b> #${row.account_id}</p>
-      <p><b>Status:</b> <span style="color:${statusColor};">${statusText}</span></p>
       <p><b>Expiră:</b> ${row.expires_at}</p>
       ${row.status === 'active' ? `<p><b>Zile rămase:</b> <span style="color:#00e5a0;font-size:24px;font-weight:800;">${daysLeft}</span></p>` : ''}
     </div>
-    <br>
-    <a href="/check-status" style="color:#00e5a0;">Verifică alt cont</a>
+    <br><a href="/check-status" style="color:#00e5a0;">Verifică alt cont</a>
   </body></html>`);
 });
 
-// ─── ADMIN Endpoints ──────────────────────────────────────────────────────────
+// ─── Admin Endpoints ──────────────────────────────────────────────────────────
 app.post('/admin/license', adminAuth, async (req, res) => {
   const { account_id, email, months = 1, plan = 'monthly', notes } = req.body;
   if (!account_id) return res.status(400).json({ error: 'account_id required' });
-
   const existing = await pool.query('SELECT * FROM licenses WHERE account_id=$1', [account_id]);
   const row = existing.rows[0];
-
   let expiresAt;
   if (row && row.status === 'active') {
     const base = new Date(row.expires_at);
@@ -389,7 +363,6 @@ app.post('/admin/license', adminAuth, async (req, res) => {
     base.setDate(base.getDate() + (parseInt(months) * 30));
     expiresAt = base.toISOString().split('T')[0];
   }
-
   await pool.query(`
     INSERT INTO licenses (account_id, email, plan, status, expires_at, notes)
     VALUES ($1,$2,$3,'active',$4,$5)
@@ -397,11 +370,7 @@ app.post('/admin/license', adminAuth, async (req, res) => {
       email=excluded.email, plan=excluded.plan,
       status='active', expires_at=excluded.expires_at, notes=excluded.notes
   `, [account_id, email, plan, expiresAt, notes]);
-
-  await sendTelegram(
-    `✅ <b>Licență adăugată manual!</b>\n👤 Cont: <b>#${account_id}</b>\n📧 Email: ${email || 'nespecificat'}\n📅 Expiră: ${expiresAt}`
-  );
-
+  await sendTelegram(`✅ <b>Licență adăugată!</b>\n👤 Cont: <b>#${account_id}</b>\n📧 Email: ${email || 'nespecificat'}\n📅 Expiră: ${expiresAt}`);
   res.json({ success: true, account_id, expires_at: expiresAt, months_added: months });
 });
 
