@@ -282,7 +282,8 @@ const T = {
     'le-empty':'Completează email și parola.','le-inv':'Email sau parolă incorectă.',
     're-empty':'Completează toate câmpurile.','re-ok':'Cont creat! Verifică emailul.',
     'acct-err-empty':'Introdu un număr valid.','acct-err-exists':'Cont deja adăugat.',
-    'confirm-rm':'Elimini contul ','placeholder-acct':'Număr cont MT5...'
+    'confirm-rm':'Elimini contul ','placeholder-acct':'Număr cont MT5...',
+    'rm-btn':'Elimină'
   },
   en:{
     'logout':'Sign out','loading':'Loading...',
@@ -304,7 +305,8 @@ const T = {
     'le-empty':'Please enter email and password.','le-inv':'Incorrect email or password.',
     're-empty':'Please fill in all fields.','re-ok':'Account created! Check your email.',
     'acct-err-empty':'Enter a valid number.','acct-err-exists':'Account already added.',
-    'confirm-rm':'Remove account ','placeholder-acct':'MT5 account number...'
+    'confirm-rm':'Remove account ','placeholder-acct':'MT5 account number...',
+    'rm-btn':'Remove'
   },
   de:{
     'logout':'Abmelden','loading':'Wird geladen...',
@@ -326,13 +328,16 @@ const T = {
     'le-empty':'Bitte E-Mail und Passwort eingeben.','le-inv':'Falsche E-Mail oder Passwort.',
     're-empty':'Bitte alle Felder ausfüllen.','re-ok':'Konto erstellt! E-Mail prüfen.',
     'acct-err-empty':'Gültige Nummer eingeben.','acct-err-exists':'Konto bereits hinzugefügt.',
-    'confirm-rm':'Konto entfernen ','placeholder-acct':'MT5-Kontonummer...'
+    'confirm-rm':'Konto entfernen ','placeholder-acct':'MT5-Kontonummer...',
+    'rm-btn':'Entfernen'
   }
 };
 
 let lang = 'ro';
 let accts = [];
 let maxAccts = 2;
+// Store current user data for invoice generation
+let currentUserData = {};
 
 function t(k){ return T[lang][k] || k; }
 
@@ -362,6 +367,9 @@ function showForm(f){
 
 // ── RENDER PORTAL ─────────────────────────────────────────────────────────────
 function renderPortal(userData){
+  // Store userData globally for invoice generation
+  currentUserData = userData;
+
   // Avatar & name
   const name = userData.name || 'Client';
   const initials = name.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase();
@@ -404,21 +412,23 @@ function renderPortal(userData){
   maxAccts = userData.maxAccounts || DEMO.maxAccounts;
   renderAccts();
 
-  // Invoices
+  // Invoices — FIX: use userData.name and userData.email (not undefined 'u')
   const invoices = userData.invoices || DEMO.invoices;
   const invEl = document.getElementById('invEl');
   invEl.innerHTML = '';
   invoices.forEach(inv=>{
-    const invDate = inv.date;
-    const invPlan = inv.plan;
-    const invAmt = inv.amount;
-    const invName = u.name || '';
-    const invEmail = u.email || '';
+    const invDate  = inv.date;
+    const invPlan  = inv.plan;
+    const invAmt   = inv.amount;
+    const invName  = userData.name  || '';
+    const invEmail = userData.email || '';
     invEl.innerHTML += `
       <div class="inv-row">
-        <div><div class="inv-date">${inv.date}</div><div class="inv-plan">${inv.plan}</div></div>
-        <div style="display:flex;align-items:center"><div class="inv-amount">${inv.amount}</div>
-        <button class="inv-btn" onclick="generateInvoicePDF('${invDate}','${invPlan}','${invAmt}','${invName}','${invEmail}')">${t('inv-pdf')}</button></div>
+        <div><div class="inv-date">${invDate}</div><div class="inv-plan">${invPlan}</div></div>
+        <div style="display:flex;align-items:center">
+          <div class="inv-amount">${invAmt}</div>
+          <button class="inv-btn" onclick="generateInvoicePDF('${invDate}','${invPlan}','${invAmt}','${encodeURIComponent(invName)}','${encodeURIComponent(invEmail)}')">${t('inv-pdf')}</button>
+        </div>
       </div>`;
   });
 
@@ -436,7 +446,7 @@ function renderAccts(){
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4d9fff" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
         <div class="acct-num">${a}</div>
         <div class="acct-ok">✓</div>
-        <button class="acct-rm" onclick="rmAcct('${a}')">${t('acct-used').replace('Conturi folosite:','Elimină').replace('Accounts used:','Remove').replace('Konten genutzt:','Entfernen')}</button>
+        <button class="acct-rm" onclick="rmAcct('${a}')">${t('rm-btn')}</button>
       </div>`;
   });
   document.getElementById('limitEl').style.display   = accts.length>=maxAccts ? 'flex' : 'none';
@@ -481,7 +491,7 @@ function doLogin(){
   ok.textContent='Se conectează...'; ok.style.display='block';
   setTimeout(()=>{
     ok.style.display='none';
-    renderPortal({ name: email.split('@')[0], ...DEMO });
+    renderPortal({ name: email.split('@')[0], email: email, ...DEMO });
   },1000);
 }
 
@@ -501,9 +511,10 @@ async function doLogout(){
   show('viewLogin'); showForm('login');
 }
 
-
 // ── PDF FACTURA CLIENT ────────────────────────────────────────────────────────
 function generateInvoicePDF(date, plan, amount, userName, userEmail) {
+  const name  = decodeURIComponent(userName);
+  const email = decodeURIComponent(userEmail);
   const win = window.open('', '_blank');
   win.document.write(`<!DOCTYPE html>
 <html>
@@ -511,23 +522,23 @@ function generateInvoicePDF(date, plan, amount, userName, userEmail) {
 <meta charset="UTF-8">
 <title>Factura ${date}</title>
 <style>
-  body { font-family: Arial, sans-serif; padding: 40px; color: #1a1a1a; max-width: 700px; margin: 0 auto; }
-  .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 40px; border-bottom: 2px solid #00e5a0; padding-bottom: 20px; }
-  .company { font-size: 22px; font-weight: 800; color: #0a0c0f; }
-  .company-sub { font-size: 12px; color: #666; margin-top: 4px; }
-  .invoice-title { font-size: 28px; font-weight: 700; color: #0a0c0f; text-align: right; }
-  .invoice-num { font-size: 12px; color: #666; text-align: right; }
-  .info-section { display: flex; justify-content: space-between; margin-bottom: 40px; }
-  .info-block h4 { font-size: 11px; text-transform: uppercase; color: #999; letter-spacing: 1px; margin-bottom: 8px; }
-  .info-block p { font-size: 14px; color: #1a1a1a; margin: 2px 0; }
-  table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
-  th { background: #0a0c0f; color: #fff; padding: 12px 16px; text-align: left; font-size: 12px; text-transform: uppercase; }
-  td { padding: 14px 16px; border-bottom: 1px solid #eee; font-size: 14px; }
-  .total-row { background: #f8f8f8; font-weight: 700; }
-  .total-amount { font-size: 18px; color: #0a0c0f; }
-  .footer { text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #eee; font-size: 11px; color: #999; }
-  .badge { display: inline-block; background: #00e5a0; color: #000; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; }
-  @media print { body { padding: 20px; } }
+  body{font-family:Arial,sans-serif;padding:40px;color:#1a1a1a;max-width:700px;margin:0 auto;}
+  .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:40px;border-bottom:2px solid #00e5a0;padding-bottom:20px;}
+  .company{font-size:22px;font-weight:800;color:#0a0c0f;}
+  .company-sub{font-size:12px;color:#666;margin-top:4px;}
+  .invoice-title{font-size:28px;font-weight:700;color:#0a0c0f;text-align:right;}
+  .invoice-num{font-size:12px;color:#666;text-align:right;}
+  .info-section{display:flex;justify-content:space-between;margin-bottom:40px;}
+  .info-block h4{font-size:11px;text-transform:uppercase;color:#999;letter-spacing:1px;margin-bottom:8px;}
+  .info-block p{font-size:14px;color:#1a1a1a;margin:2px 0;}
+  table{width:100%;border-collapse:collapse;margin-bottom:30px;}
+  th{background:#0a0c0f;color:#fff;padding:12px 16px;text-align:left;font-size:12px;text-transform:uppercase;}
+  td{padding:14px 16px;border-bottom:1px solid #eee;font-size:14px;}
+  .total-row{background:#f8f8f8;font-weight:700;}
+  .total-amount{font-size:18px;color:#0a0c0f;}
+  .footer{text-align:center;margin-top:40px;padding-top:20px;border-top:1px solid #eee;font-size:11px;color:#999;}
+  .badge{display:inline-block;background:#00e5a0;color:#000;padding:4px 12px;border-radius:20px;font-size:11px;font-weight:700;}
+  @media print{body{padding:20px;}}
 </style>
 </head>
 <body>
@@ -552,14 +563,12 @@ function generateInvoicePDF(date, plan, amount, userName, userEmail) {
   </div>
   <div class="info-block">
     <h4>Facturat către</h4>
-    <p><strong>${userName || 'Client'}</strong></p>
-    <p>${userEmail || ''}</p>
+    <p><strong>${name || 'Client'}</strong></p>
+    <p>${email || ''}</p>
   </div>
 </div>
 <table>
-  <thead>
-    <tr><th>Descriere</th><th>Perioadă</th><th>Total</th></tr>
-  </thead>
+  <thead><tr><th>Descriere</th><th>Perioadă</th><th>Total</th></tr></thead>
   <tbody>
     <tr>
       <td><strong>${plan}</strong><br><span style="font-size:12px;color:#666">Abonament EA Strategies — acces strategii MT5</span></td>
@@ -577,7 +586,7 @@ function generateInvoicePDF(date, plan, amount, userName, userEmail) {
   <p>Pentru întrebări: contact@ea-strategies.com</p>
   <p style="margin-top:8px;color:#ccc">Acest document a fost generat automat</p>
 </div>
-<scr"+"ipt>window.onload = function(){ window.print(); }</scr"+"ipt>
+<script>window.onload=function(){window.print();}<\/script>
 </body>
 </html>`);
   win.document.close();
@@ -591,13 +600,12 @@ const bmap={'ro':0,'en':1,'de':2};
 if(btns[bmap[det]]) btns[bmap[det]].classList.add('active');
 applyLang(det);
 
-// Init — show login immediately, check session in background
 show('viewLoading');
 sb.auth.getSession().then(({ data }) => {
   const session = data?.session;
   if(session && session.user){
     renderPortal({
-      name: session.user.user_metadata?.full_name || session.user.email,
+      name:  session.user.user_metadata?.full_name || session.user.email,
       email: session.user.email,
       ...DEMO
     });
