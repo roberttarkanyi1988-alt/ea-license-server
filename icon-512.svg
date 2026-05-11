@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Background -->
+  <rect width="512" height="512" rx="100" fill="#0a0c0f"/>
+
+  <!-- Cele 4 puncte in colturi -->
+  <circle cx="80" cy="80" r="36" fill="#00e5a0"/>
+  <circle cx="432" cy="80" r="36" fill="#ff3d5a"/>
+  <circle cx="80" cy="432" r="36" fill="#ffb800"/>
+  <circle cx="432" cy="432" r="36" fill="#0066ff"/>
+
+  <!-- Text EA -->
+  <text x="256" y="300" font-family="Arial Black, sans-serif" font-size="180" font-weight="900" fill="#e8eaf0" text-anchor="middle" letter-spacing="-8">EA</text>
+</svg>
