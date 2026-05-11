@@ -228,8 +228,9 @@ app.get('/api/check', async (req, res) => {
 });
 
 // ─── Stripe: Creare link plată ────────────────────────────────────────────────
+// Acum acceptă și plan + eas din landing page
 app.post('/api/create-payment', async (req, res) => {
-  const { account_id, email, months = 1 } = req.body;
+  const { account_id, email, months = 1, plan = 'basic', eas = '' } = req.body;
   if (!account_id) return res.status(400).json({ error: 'account_id required' });
   try {
     const session = await stripe.checkout.sessions.create({
@@ -237,7 +238,13 @@ app.post('/api/create-payment', async (req, res) => {
       mode: 'subscription',
       customer_email: email || undefined,
       line_items: [{ price: process.env.STRIPE_PRICE_ID, quantity: months }],
-      metadata: { account_id, months: String(months), email: email || '' },
+      metadata: {
+        account_id,
+        months: String(months),
+        email: email || '',
+        plan: plan,
+        eas: eas
+      },
       success_url: 'https://ea-license-server-lrsl.onrender.com/payment-success?session_id={CHECKOUT_SESSION_ID}',
       cancel_url:  'https://ea-license-server-lrsl.onrender.com/payment-cancel',
     });
@@ -260,19 +267,43 @@ app.post('/webhook', async (req, res) => {
 
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
-    const { account_id, months, email } = session.metadata;
+    const { account_id, months, email, plan, eas } = session.metadata;
     const base = new Date();
     base.setDate(base.getDate() + (parseInt(months) * 30));
     const expiresAt = base.toISOString().split('T')[0];
+
+    // Salvează planul și EA-urile in notes pentru referinta
+    const notesText = eas
+      ? `Plată Stripe | Plan: ${plan} | EA-uri: ${eas}`
+      : `Plată Stripe automată | Plan: ${plan || 'basic'}`;
+
     await pool.query(`
       INSERT INTO licenses (account_id, email, plan, status, expires_at, notes)
-      VALUES ($1,$2,'monthly','active',$3,'Plată Stripe automată')
+      VALUES ($1,$2,$3,'active',$4,$5)
       ON CONFLICT(account_id) DO UPDATE SET
-        email=excluded.email, status='active',
-        expires_at=excluded.expires_at, notes=excluded.notes
-    `, [account_id, email, expiresAt]);
-    if (email) await addDiscordRole(email, 'basic');
-    await sendTelegram(`💳 <b>Plată primită!</b>\n👤 Cont: <b>#${account_id}</b>\n📧 Email: ${email || 'nespecificat'}\n📅 Activ până: ${expiresAt}`);
+        email=excluded.email, plan=excluded.plan,
+        status='active', expires_at=excluded.expires_at, notes=excluded.notes
+    `, [account_id, email, plan || 'basic', expiresAt, notesText]);
+
+    if (email) await addDiscordRole(email, plan || 'basic');
+
+    // ─── Telegram cu toate detaliile pentru tine ─────────────────
+    const easLine = eas
+      ? `\n🤖 <b>EA-uri alese:</b> ${eas}`
+      : '';
+    const planLine = plan
+      ? `\n📦 <b>Plan:</b> ${plan}`
+      : '';
+
+    await sendTelegram(
+      `💳 <b>PLATĂ NOUĂ PRIMITĂ!</b>\n` +
+      `👤 Cont MT5: <b>#${account_id}</b>\n` +
+      `📧 Email: ${email || 'nespecificat'}` +
+      planLine +
+      easLine +
+      `\n📅 Activ până: ${expiresAt}\n` +
+      `\n⚡ <b>TODO: Compilează EA-urile de mai sus cu contul #${account_id} și trimite pe Discord!</b>`
+    );
   }
 
   if (event.type === 'customer.subscription.deleted' || event.type === 'invoice.payment_failed') {
@@ -303,7 +334,7 @@ app.post('/discord/remove-role', adminAuth, async (req, res) => {
 app.get('/payment-success', (req, res) => {
   res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:50px;background:#0a0c0f;color:#e8eaf0;">
     <h1 style="color:#00e5a0;">✅ Plată reușită!</h1>
-    <p>Abonamentul tău a fost activat.</p>
+    <p>Abonamentul tău a fost activat. Vei primi EA-ul pe Discord în scurt timp.</p>
     <a href="/client" style="color:#00e5a0;">Mergi la portal →</a>
   </body></html>`);
 });
@@ -370,7 +401,7 @@ app.post('/admin/license', adminAuth, async (req, res) => {
       email=excluded.email, plan=excluded.plan,
       status='active', expires_at=excluded.expires_at, notes=excluded.notes
   `, [account_id, email, plan, expiresAt, notes]);
-  await sendTelegram(`✅ <b>Licență adăugată!</b>\n👤 Cont: <b>#${account_id}</b>\n📧 Email: ${email || 'nespecificat'}\n📅 Expiră: ${expiresAt}`);
+  await sendTelegram(`✅ <b>Licență adăugată manual!</b>\n👤 Cont: <b>#${account_id}</b>\n📧 Email: ${email || 'nespecificat'}\n📦 Plan: ${plan}\n📅 Expiră: ${expiresAt}`);
   res.json({ success: true, account_id, expires_at: expiresAt, months_added: months });
 });
 
