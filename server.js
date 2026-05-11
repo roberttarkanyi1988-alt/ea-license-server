@@ -40,6 +40,12 @@ app.get('/admin-panel', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
+// ─── PWA Files ────────────────────────────────────────────────────────────────
+app.get('/manifest.json', (req, res) => res.sendFile(path.join(__dirname, 'manifest.json')));
+app.get('/sw.js', (req, res) => res.sendFile(path.join(__dirname, 'sw.js')));
+app.get('/icon-512.svg', (req, res) => res.sendFile(path.join(__dirname, 'icon-512.svg')));
+app.get('/icon-192.svg', (req, res) => res.sendFile(path.join(__dirname, 'icon-192.svg')));
+
 // ─── Database Setup ───────────────────────────────────────────────────────────
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
