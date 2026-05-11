@@ -3,6 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0a0c0f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="EA Strategies">
+<link rel="apple-touch-icon" href="/icon-512.svg">
 <title>EA Strategies — Trading Automatizat Profesional</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -829,6 +835,13 @@ if(btns[bmap[det]])btns[bmap[det]].classList.add('active');
 applyLang(det);
 document.getElementById('riskBannerText').innerHTML = RISK_TEXTS[det]||RISK_TEXTS.ro;
 document.getElementById('riskFooterText').innerHTML = RISK_FOOTER_TEXTS[det]||RISK_FOOTER_TEXTS.ro;
+</script>
+<script>
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('/sw.js').then(()=>{
+    console.log('SW registered');
+  }).catch(()=>{});
+}
 </script>
 </body>
 </html>
