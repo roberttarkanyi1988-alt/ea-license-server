@@ -2,6 +2,7 @@ const express = require('express');
 const { Pool } = require('pg');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
+const crypto = require('crypto'); // 🔐 NOU pentru HMAC
 require('dotenv').config();
 const { Client, GatewayIntentBits } = require('discord.js');
 
@@ -16,6 +17,21 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 // ─── Admin Key ────────────────────────────────────────────────────────────────
 const ADMIN_KEY = process.env.ADMIN_KEY || 'schimba-aceasta-cheie-secreta';
+
+// 🔐 NOU: HMAC Setup pentru securitate EA
+const HMAC_SECRET = process.env.HMAC_SECRET || '';
+const TIMESTAMP_WINDOW_SECONDS = 60;
+
+if (!HMAC_SECRET) {
+  console.warn('⚠️  HMAC_SECRET nu e setat! Mod backwards compat activ.');
+} else {
+  console.log('✅ HMAC_SECRET încărcat — securitate maximă activă');
+}
+
+function generateHMAC(payload) {
+  if (!HMAC_SECRET) return '';
+  return crypto.createHmac('sha256', HMAC_SECRET).update(payload).digest('hex');
+}
 
 // ─── ROUTES ───────────────────────────────────────────────────────────────────
 app.get('/', (req, res) => {
@@ -208,16 +224,41 @@ function adminAuth(req, res, next) {
   next();
 }
 
-// ─── Verificare licență ───────────────────────────────────────────────────────
+// ─── Verificare licență (cu HMAC + Timestamp backwards compat) ────────────────
 app.get('/api/check', async (req, res) => {
-  const { account } = req.query;
+  const { account, ts } = req.query; // 🔐 NOU: extrag și ts
   const ip = req.ip;
   if (!account) { await logAccess(null, ip, 'MISSING_ACCOUNT'); return res.status(400).send('INVALID'); }
 
+  // 🔐 NOU: Verificare timestamp pentru anti-replay (doar dacă EA-ul îl trimite)
+  if (ts) {
+    const clientTime = parseInt(ts, 10);
+    const serverTime = Math.floor(Date.now() / 1000);
+    const diff = Math.abs(serverTime - clientTime);
+    if (diff > TIMESTAMP_WINDOW_SECONDS) {
+      await logAccess(account, ip, 'TIMESTAMP_INVALID');
+      return res.send('INVALID');
+    }
+  }
+
   const result = await pool.query('SELECT * FROM licenses WHERE account_id=$1', [account]);
   const row = result.rows[0];
-  if (!row) { await logAccess(account, ip, 'NOT_FOUND'); return res.send('INVALID'); }
-  if (row.status === 'suspended') { await logAccess(account, ip, 'SUSPENDED'); return res.send('SUSPENDED'); }
+
+  // Funcție helper pentru a forma răspunsul cu/fără HMAC
+  const buildResponse = (baseResponse) => {
+    // 🔐 NOU: Dacă EA-ul a trimis ts + avem HMAC_SECRET → format nou
+    if (ts && HMAC_SECRET) {
+      const serverTs = Math.floor(Date.now() / 1000);
+      const payload = `${baseResponse}|${serverTs}`;
+      const hmac = generateHMAC(payload);
+      return `${payload}|${hmac}`;
+    }
+    // Format vechi (backwards compat)
+    return baseResponse;
+  };
+
+  if (!row) { await logAccess(account, ip, 'NOT_FOUND'); return res.send(buildResponse('INVALID')); }
+  if (row.status === 'suspended') { await logAccess(account, ip, 'SUSPENDED'); return res.send(buildResponse('SUSPENDED')); }
 
   const now = new Date();
   const expiry = new Date(row.expires_at);
@@ -225,12 +266,22 @@ app.get('/api/check', async (req, res) => {
     await pool.query("UPDATE licenses SET status='expired' WHERE account_id=$1", [account]);
     if (row.email) await removeDiscordRole(row.email);
     await logAccess(account, ip, 'EXPIRED');
-    return res.send('EXPIRED');
+    return res.send(buildResponse('EXPIRED'));
   }
 
   const daysLeft = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
   await logAccess(account, ip, 'VALID');
-  return res.send(`VALID|${row.expires_at}|${daysLeft}`);
+  return res.send(buildResponse(`VALID|${row.expires_at}|${daysLeft}`));
+});
+
+// 🔐 NOU: Endpoint test pentru a verifica HMAC e activ
+app.get('/api/hmac-test', (req, res) => {
+  res.json({
+    hmac_enabled: !!HMAC_SECRET,
+    secret_length: HMAC_SECRET.length,
+    timestamp: Math.floor(Date.now() / 1000),
+    test_signature: generateHMAC('test_payload')
+  });
 });
 
 // ─── Stripe: Creare link plată ────────────────────────────────────────────────
