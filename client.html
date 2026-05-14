@@ -3,12 +3,6 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<link rel="manifest" href="/manifest.json">
-<meta name="theme-color" content="#0a0c0f">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black">
-<meta name="apple-mobile-web-app-title" content="EA Strategies">
-<link rel="apple-touch-icon" href="/icon-512.svg">
 <title>EA Strategies — Portal Client</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -249,22 +243,21 @@ const SUPA_URL  = 'https://cxtbthwoffyeazlxzequ.supabase.co';
 const SUPA_KEY  = 'sb_publishable_mFCIzSx4s7dGbQKRhJchLQ_fv9bSu38';
 const sb = window.supabase.createClient(SUPA_URL, SUPA_KEY);
 
-// ── DEMO DATA ─────────────────────────────────────────────────────────────────
-const DEMO = {
-  plan: 'pro',
-  memberSince: 'Martie 2026',
-  accounts: ['12345678', '87654321'],
-  maxAccounts: 2,
-  licenses: [
-    { ea:'EA Strategy 1', symbol:'XAUUSD · M5', expires:'2026-06-09', daysLeft:21, daysTotal:30, active:true },
-    { ea:'EA Strategy 3', symbol:'GBPUSD · H4', expires:'2026-06-09', daysLeft:21, daysTotal:30, active:true }
-  ],
-  invoices: [
-    { date:'Mai 2026', plan:'Plan Pro', amount:'€45.00' },
-    { date:'Apr 2026', plan:'Plan Pro', amount:'€45.00' },
-    { date:'Mar 2026', plan:'Plan Pro', amount:'€45.00' }
-  ]
+// ── FALLBACK DATA (când userul e nou și n-are încă date în DB) ────────────────
+const FALLBACK = {
+  plan: 'basic',
+  memberSince: '—',
+  accounts: [],
+  maxAccounts: 1,
+  licenses: [],
+  invoices: []
 };
+
+// ── STATE GLOBAL ──────────────────────────────────────────────────────────────
+let currentUser = null;        // user din Supabase auth
+let currentUserId = null;      // id-ul din tabela `users`
+let currentEmail = null;
+let currentUserData = {};      // datele afișate în portal
 
 // ── TRANSLATIONS ──────────────────────────────────────────────────────────────
 const T = {
@@ -288,8 +281,10 @@ const T = {
     'le-empty':'Completează email și parola.','le-inv':'Email sau parolă incorectă.',
     're-empty':'Completează toate câmpurile.','re-ok':'Cont creat! Verifică emailul.',
     'acct-err-empty':'Introdu un număr valid.','acct-err-exists':'Cont deja adăugat.',
+    'acct-err-save':'Eroare la salvare. Încearcă din nou.',
     'confirm-rm':'Elimini contul ','placeholder-acct':'Număr cont MT5...',
-    'rm-btn':'Elimină'
+    'no-licenses':'Nu ai licențe active. Cumpără un abonament pentru a începe.',
+    'no-invoices':'Nu ai facturi încă.'
   },
   en:{
     'logout':'Sign out','loading':'Loading...',
@@ -311,8 +306,10 @@ const T = {
     'le-empty':'Please enter email and password.','le-inv':'Incorrect email or password.',
     're-empty':'Please fill in all fields.','re-ok':'Account created! Check your email.',
     'acct-err-empty':'Enter a valid number.','acct-err-exists':'Account already added.',
+    'acct-err-save':'Save error. Try again.',
     'confirm-rm':'Remove account ','placeholder-acct':'MT5 account number...',
-    'rm-btn':'Remove'
+    'no-licenses':'No active licenses. Purchase a subscription to start.',
+    'no-invoices':'No invoices yet.'
   },
   de:{
     'logout':'Abmelden','loading':'Wird geladen...',
@@ -334,16 +331,16 @@ const T = {
     'le-empty':'Bitte E-Mail und Passwort eingeben.','le-inv':'Falsche E-Mail oder Passwort.',
     're-empty':'Bitte alle Felder ausfüllen.','re-ok':'Konto erstellt! E-Mail prüfen.',
     'acct-err-empty':'Gültige Nummer eingeben.','acct-err-exists':'Konto bereits hinzugefügt.',
+    'acct-err-save':'Speicherfehler. Versuchen Sie es erneut.',
     'confirm-rm':'Konto entfernen ','placeholder-acct':'MT5-Kontonummer...',
-    'rm-btn':'Entfernen'
+    'no-licenses':'Keine aktiven Lizenzen. Abonnement kaufen.',
+    'no-invoices':'Noch keine Rechnungen.'
   }
 };
 
 let lang = 'ro';
 let accts = [];
-let maxAccts = 2;
-// Store current user data for invoice generation
-let currentUserData = {};
+let maxAccts = 1;
 
 function t(k){ return T[lang][k] || k; }
 
@@ -358,6 +355,12 @@ function applyLang(l){
 function setLang(l,el){
   document.querySelectorAll('.lang-btn').forEach(b=>b.classList.remove('active'));
   el.classList.add('active'); applyLang(l);
+  // Re-render dacă suntem deja în portal (pentru a actualiza textele dinamice)
+  if(currentUserData && currentUserData.name){
+    renderLicenses(currentUserData.licenses || []);
+    renderAccts();
+    renderInvoices(currentUserData.invoices || []);
+  }
 }
 
 // ── VIEWS ─────────────────────────────────────────────────────────────────────
@@ -371,11 +374,145 @@ function showForm(f){
   document.getElementById('formRegister').style.display = f==='register' ? 'block':'none';
 }
 
+// ── 🆕 LOAD USER DATA FROM SUPABASE ───────────────────────────────────────────
+async function loadUserDataFromSupabase(authUser){
+  currentUser = authUser;
+  currentEmail = authUser.email;
+  
+  // 1. Caut sau creez user în tabela `users`
+  let { data: userRow, error: userErr } = await sb
+    .from('users')
+    .select('id, email, full_name, created_at, stripe_customer_id, discord_user_id')
+    .eq('email', authUser.email)
+    .maybeSingle();
+  
+  if(!userRow){
+    // User nou — creează intrare
+    const { data: newUser, error: createErr } = await sb
+      .from('users')
+      .insert({
+        email: authUser.email,
+        full_name: authUser.user_metadata?.full_name || authUser.email.split('@')[0],
+        google_id: authUser.id
+      })
+      .select()
+      .single();
+    
+    if(createErr){
+      console.error('Eroare creare user:', createErr);
+      // Fallback la datele de bază din auth
+      return {
+        name: authUser.user_metadata?.full_name || authUser.email,
+        email: authUser.email,
+        ...FALLBACK
+      };
+    }
+    userRow = newUser;
+  }
+  
+  currentUserId = userRow.id;
+  
+  // 2. Caut subscription activă (cea mai recentă cu status active sau grace_period)
+  const { data: subRow } = await sb
+    .from('subscriptions')
+    .select('id, plan, max_mt5_accounts, status, current_period_start, current_period_end, grace_period_until')
+    .eq('user_id', userRow.id)
+    .in('status', ['active', 'grace_period'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  
+  // 3. Caut conturi MT5 active
+  const { data: mtRows } = await sb
+    .from('mt5_accounts')
+    .select('account_number, broker')
+    .eq('user_id', userRow.id)
+    .eq('is_active', true)
+    .order('added_at', { ascending: true });
+  
+  // 4. Caut licențe EA active
+  const { data: licRows } = await sb
+    .from('ea_licenses')
+    .select('ea_name, status, activated_at, expires_at')
+    .eq('user_id', userRow.id)
+    .order('activated_at', { ascending: true });
+  
+  // 5. Caut facturi
+  const { data: invRows } = await sb
+    .from('invoices')
+    .select('id, amount_cents, currency, status, paid_at, invoice_pdf_url, created_at, subscription_id')
+    .eq('user_id', userRow.id)
+    .order('created_at', { ascending: false })
+    .limit(12);
+  
+  // Construire data pentru render
+  const data = {
+    name: userRow.full_name || authUser.email.split('@')[0],
+    email: authUser.email,
+    memberSince: userRow.created_at ? formatMonthYear(userRow.created_at) : '—',
+    plan: subRow ? subRow.plan : 'basic',
+    maxAccounts: subRow ? subRow.max_mt5_accounts : 1,
+    accounts: (mtRows || []).map(m => m.account_number),
+    licenses: (licRows || []).map(l => buildLicenseView(l, subRow)),
+    invoices: (invRows || []).map(i => ({
+      date: formatMonthYear(i.paid_at || i.created_at),
+      plan: subRow ? ('Plan ' + capitalize(subRow.plan)) : 'Abonament',
+      amount: formatMoney(i.amount_cents, i.currency)
+    }))
+  };
+  
+  return data;
+}
+
+function buildLicenseView(licRow, subRow){
+  const now = new Date();
+  const expires = licRow.expires_at ? new Date(licRow.expires_at) : null;
+  const activated = licRow.activated_at ? new Date(licRow.activated_at) : null;
+  
+  const daysLeft = expires ? Math.max(0, Math.ceil((expires - now) / 86400000)) : 30;
+  let daysTotal = 30;
+  if(activated && expires){
+    daysTotal = Math.max(1, Math.ceil((expires - activated) / 86400000));
+  }
+  
+  return {
+    ea: licRow.ea_name,
+    symbol: '', // poate fi extins ulterior
+    expires: expires ? expires.toISOString().split('T')[0] : '—',
+    daysLeft: daysLeft,
+    daysTotal: daysTotal,
+    active: licRow.status === 'active' && daysLeft > 0
+  };
+}
+
+function formatMonthYear(dateStr){
+  if(!dateStr) return '—';
+  try{
+    const d = new Date(dateStr);
+    const months = {
+      ro:['Ianuarie','Februarie','Martie','Aprilie','Mai','Iunie','Iulie','August','Septembrie','Octombrie','Noiembrie','Decembrie'],
+      en:['January','February','March','April','May','June','July','August','September','October','November','December'],
+      de:['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember']
+    };
+    return months[lang][d.getMonth()] + ' ' + d.getFullYear();
+  }catch(e){ return dateStr; }
+}
+
+function formatMoney(cents, currency){
+  const amount = (cents / 100).toFixed(2);
+  const symbol = (currency || 'eur').toLowerCase() === 'eur' ? '€' : '$';
+  return symbol + amount;
+}
+
+function capitalize(s){
+  if(!s) return '';
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
 // ── RENDER PORTAL ─────────────────────────────────────────────────────────────
 function renderPortal(userData){
-  // Store userData globally for invoice generation
   currentUserData = userData;
-
+  
   // Avatar & name
   const name = userData.name || 'Client';
   const initials = name.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase();
@@ -383,25 +520,43 @@ function renderPortal(userData){
   document.getElementById('nameEl').textContent = name;
 
   // Plan badge
-  const plan = userData.plan || 'pro';
+  const plan = userData.plan || 'basic';
   const badge = document.getElementById('badgeEl');
   badge.textContent = t('plan-'+plan);
   badge.className = 'plan-badge plan-'+plan;
 
   // Member since
-  if(userData.memberSince) document.getElementById('sinceEl').textContent = userData.memberSince;
+  document.getElementById('sinceEl').textContent = userData.memberSince || '—';
 
-  // Licenses
-  const licenses = userData.licenses || DEMO.licenses;
+  // Licenses, Accounts, Invoices
+  renderLicenses(userData.licenses || []);
+  
+  accts = userData.accounts ? [...userData.accounts] : [];
+  maxAccts = userData.maxAccounts || 1;
+  renderAccts();
+  
+  renderInvoices(userData.invoices || []);
+
+  show('viewPortal');
+}
+
+function renderLicenses(licenses){
   const licEl = document.getElementById('licEl');
   licEl.innerHTML = '';
+  
+  if(licenses.length === 0){
+    licEl.innerHTML = `<div class="lic-card" style="text-align:center;color:var(--muted);font-size:13px;">${t('no-licenses')}</div>`;
+    return;
+  }
+  
   licenses.forEach(lic=>{
     const pct = Math.round((lic.daysLeft/lic.daysTotal)*100);
     const fillClass = pct>50?'prog-green':pct>20?'prog-warn':'prog-danger';
+    const symbolHtml = lic.symbol ? `<span style="font-size:12px;color:var(--muted);font-family:var(--mono);font-weight:400">· ${lic.symbol}</span>` : '';
     licEl.innerHTML += `
       <div class="lic-card">
         <div class="lic-header">
-          <div class="lic-name"><div class="lic-dot"></div>${lic.ea} <span style="font-size:12px;color:var(--muted);font-family:var(--mono);font-weight:400">· ${lic.symbol}</span></div>
+          <div class="lic-name"><div class="lic-dot"></div>${lic.ea} ${symbolHtml}</div>
           <span class="status-pill ${lic.active?'s-active':'s-expired'}">${lic.active?t('status-active'):t('status-expired')}</span>
         </div>
         <div class="lic-rows">
@@ -412,33 +567,27 @@ function renderPortal(userData){
         <div class="prog-lbl">${lic.daysLeft} ${t('days-left')} ${lic.daysTotal}</div>
       </div>`;
   });
+}
 
-  // Accounts
-  accts = userData.accounts ? [...userData.accounts] : [...DEMO.accounts];
-  maxAccts = userData.maxAccounts || DEMO.maxAccounts;
-  renderAccts();
-
-  // Invoices — FIX: use userData.name and userData.email (not undefined 'u')
-  const invoices = userData.invoices || DEMO.invoices;
+function renderInvoices(invoices){
   const invEl = document.getElementById('invEl');
   invEl.innerHTML = '';
+  
+  if(invoices.length === 0){
+    invEl.innerHTML = `<div style="text-align:center;color:var(--muted);font-size:13px;padding:12px 0;">${t('no-invoices')}</div>`;
+    return;
+  }
+  
   invoices.forEach(inv=>{
-    const invDate  = inv.date;
-    const invPlan  = inv.plan;
-    const invAmt   = inv.amount;
-    const invName  = userData.name  || '';
-    const invEmail = userData.email || '';
+    const invName = (currentUserData.name || '').replace(/'/g, "\\'");
+    const invEmail = (currentUserData.email || '').replace(/'/g, "\\'");
     invEl.innerHTML += `
       <div class="inv-row">
-        <div><div class="inv-date">${invDate}</div><div class="inv-plan">${invPlan}</div></div>
-        <div style="display:flex;align-items:center">
-          <div class="inv-amount">${invAmt}</div>
-          <button class="inv-btn" onclick="generateInvoicePDF('${invDate}','${invPlan}','${invAmt}','${encodeURIComponent(invName)}','${encodeURIComponent(invEmail)}')">${t('inv-pdf')}</button>
-        </div>
+        <div><div class="inv-date">${inv.date}</div><div class="inv-plan">${inv.plan}</div></div>
+        <div style="display:flex;align-items:center"><div class="inv-amount">${inv.amount}</div>
+        <button class="inv-btn" onclick="generateInvoicePDF('${inv.date}','${inv.plan}','${inv.amount}','${invName}','${invEmail}')">${t('inv-pdf')}</button></div>
       </div>`;
   });
-
-  show('viewPortal');
 }
 
 function renderAccts(){
@@ -446,26 +595,61 @@ function renderAccts(){
   document.getElementById('acctMaxEl').textContent = maxAccts;
   const list = document.getElementById('acctListEl');
   list.innerHTML = '';
+  
+  // Buton "Elimină" tradus
+  const rmLabel = lang === 'ro' ? 'Elimină' : (lang === 'en' ? 'Remove' : 'Entfernen');
+  
   accts.forEach(a=>{
     list.innerHTML += `
       <div class="acct-item">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4d9fff" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
         <div class="acct-num">${a}</div>
         <div class="acct-ok">✓</div>
-        <button class="acct-rm" onclick="rmAcct('${a}')">${t('rm-btn')}</button>
+        <button class="acct-rm" onclick="rmAcct('${a}')">${rmLabel}</button>
       </div>`;
   });
   document.getElementById('limitEl').style.display   = accts.length>=maxAccts ? 'flex' : 'none';
   document.getElementById('addRowEl').style.display  = accts.length>=maxAccts ? 'none' : 'flex';
 }
 
-function addAcct(){
+// ── 🆕 ADD ACCT — salvează în Supabase ────────────────────────────────────────
+async function addAcct(){
   const val = document.getElementById('newAcctEl').value.trim();
   const ok  = document.getElementById('acctOkEl');
   const err = document.getElementById('acctErrEl');
   ok.style.display='none'; err.style.display='none';
+  
   if(!val||val.length<5){ err.textContent=t('acct-err-empty'); err.style.display='block'; return; }
   if(accts.includes(val)){ err.textContent=t('acct-err-exists'); err.style.display='block'; return; }
+  if(!currentUserId){ err.textContent=t('acct-err-save'); err.style.display='block'; return; }
+  
+  // Caut subscription_id curent (dacă există)
+  const { data: subRow } = await sb
+    .from('subscriptions')
+    .select('id')
+    .eq('user_id', currentUserId)
+    .in('status', ['active', 'grace_period'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  
+  // INSERT în mt5_accounts
+  const { error: insErr } = await sb
+    .from('mt5_accounts')
+    .insert({
+      user_id: currentUserId,
+      subscription_id: subRow ? subRow.id : null,
+      account_number: val,
+      is_active: true
+    });
+  
+  if(insErr){
+    console.error('Insert error:', insErr);
+    err.textContent = t('acct-err-save') + ' (' + insErr.message + ')';
+    err.style.display='block';
+    return;
+  }
+  
   accts.push(val);
   document.getElementById('newAcctEl').value='';
   ok.textContent=t('acct-ok'); ok.style.display='block';
@@ -473,9 +657,26 @@ function addAcct(){
   renderAccts();
 }
 
-function rmAcct(id){
+// ── 🆕 REMOVE ACCT — șterge din Supabase ──────────────────────────────────────
+async function rmAcct(id){
   if(!confirm(t('confirm-rm')+id+'?')) return;
-  accts=accts.filter(a=>a!==id); renderAccts();
+  if(!currentUserId){ return; }
+  
+  // Soft delete: marcăm is_active=false (păstrăm istoric)
+  const { error: delErr } = await sb
+    .from('mt5_accounts')
+    .update({ is_active: false, removed_at: new Date().toISOString() })
+    .eq('user_id', currentUserId)
+    .eq('account_number', id);
+  
+  if(delErr){
+    console.error('Delete error:', delErr);
+    alert('Eroare la ștergere: ' + delErr.message);
+    return;
+  }
+  
+  accts = accts.filter(a => a !== id);
+  renderAccts();
 }
 
 // ── AUTH ──────────────────────────────────────────────────────────────────────
@@ -487,21 +688,32 @@ async function loginGoogle(){
   if(error) alert('Eroare: '+error.message);
 }
 
-function doLogin(){
+async function doLogin(){
   const email = document.getElementById('lEmail').value.trim();
   const pass  = document.getElementById('lPass').value;
   const err   = document.getElementById('lErr');
   const ok    = document.getElementById('lOk');
   err.style.display='none'; ok.style.display='none';
   if(!email||!pass){ err.textContent=t('le-empty'); err.style.display='block'; return; }
+  
   ok.textContent='Se conectează...'; ok.style.display='block';
-  setTimeout(()=>{
+  
+  const { data, error } = await sb.auth.signInWithPassword({ email, password: pass });
+  
+  if(error){
     ok.style.display='none';
-    renderPortal({ name: email.split('@')[0], email: email, ...DEMO });
-  },1000);
+    err.textContent = t('le-inv');
+    err.style.display = 'block';
+    return;
+  }
+  
+  // Login OK — încarcă datele
+  show('viewLoading');
+  const userData = await loadUserDataFromSupabase(data.user);
+  renderPortal(userData);
 }
 
-function doRegister(){
+async function doRegister(){
   const email = document.getElementById('rEmail').value.trim();
   const pass  = document.getElementById('rPass').value;
   const mt5   = document.getElementById('rMt5').value.trim();
@@ -509,18 +721,50 @@ function doRegister(){
   const ok    = document.getElementById('rOk');
   err.style.display='none'; ok.style.display='none';
   if(!email||!pass||!mt5){ err.textContent=t('re-empty'); err.style.display='block'; return; }
+  
+  const { data, error } = await sb.auth.signUp({ email, password: pass });
+  
+  if(error){
+    err.textContent = error.message;
+    err.style.display='block';
+    return;
+  }
+  
+  // Salvăm numărul MT5 introdus la înregistrare (după ce avem user_id)
+  // Notă: dacă confirmarea email e activă, userul nu va fi logat imediat
+  if(data.user){
+    // Creează entry în users
+    await sb.from('users').insert({
+      email: email,
+      full_name: email.split('@')[0],
+      google_id: data.user.id
+    }).select().single().then(async (res) => {
+      if(res.data){
+        // Adaugă contul MT5
+        await sb.from('mt5_accounts').insert({
+          user_id: res.data.id,
+          account_number: mt5,
+          is_active: true
+        });
+      }
+    });
+  }
+  
   ok.textContent=t('re-ok'); ok.style.display='block';
 }
 
 async function doLogout(){
   await sb.auth.signOut();
+  currentUser = null;
+  currentUserId = null;
+  currentEmail = null;
+  currentUserData = {};
   show('viewLogin'); showForm('login');
 }
 
-// ── PDF FACTURA CLIENT ────────────────────────────────────────────────────────
+
+// ── PDF FACTURA CLIENT (neschimbat — design intact) ───────────────────────────
 function generateInvoicePDF(date, plan, amount, userName, userEmail) {
-  const name  = decodeURIComponent(userName);
-  const email = decodeURIComponent(userEmail);
   const win = window.open('', '_blank');
   win.document.write(`<!DOCTYPE html>
 <html>
@@ -528,23 +772,23 @@ function generateInvoicePDF(date, plan, amount, userName, userEmail) {
 <meta charset="UTF-8">
 <title>Factura ${date}</title>
 <style>
-  body{font-family:Arial,sans-serif;padding:40px;color:#1a1a1a;max-width:700px;margin:0 auto;}
-  .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:40px;border-bottom:2px solid #00e5a0;padding-bottom:20px;}
-  .company{font-size:22px;font-weight:800;color:#0a0c0f;}
-  .company-sub{font-size:12px;color:#666;margin-top:4px;}
-  .invoice-title{font-size:28px;font-weight:700;color:#0a0c0f;text-align:right;}
-  .invoice-num{font-size:12px;color:#666;text-align:right;}
-  .info-section{display:flex;justify-content:space-between;margin-bottom:40px;}
-  .info-block h4{font-size:11px;text-transform:uppercase;color:#999;letter-spacing:1px;margin-bottom:8px;}
-  .info-block p{font-size:14px;color:#1a1a1a;margin:2px 0;}
-  table{width:100%;border-collapse:collapse;margin-bottom:30px;}
-  th{background:#0a0c0f;color:#fff;padding:12px 16px;text-align:left;font-size:12px;text-transform:uppercase;}
-  td{padding:14px 16px;border-bottom:1px solid #eee;font-size:14px;}
-  .total-row{background:#f8f8f8;font-weight:700;}
-  .total-amount{font-size:18px;color:#0a0c0f;}
-  .footer{text-align:center;margin-top:40px;padding-top:20px;border-top:1px solid #eee;font-size:11px;color:#999;}
-  .badge{display:inline-block;background:#00e5a0;color:#000;padding:4px 12px;border-radius:20px;font-size:11px;font-weight:700;}
-  @media print{body{padding:20px;}}
+  body { font-family: Arial, sans-serif; padding: 40px; color: #1a1a1a; max-width: 700px; margin: 0 auto; }
+  .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 40px; border-bottom: 2px solid #00e5a0; padding-bottom: 20px; }
+  .company { font-size: 22px; font-weight: 800; color: #0a0c0f; }
+  .company-sub { font-size: 12px; color: #666; margin-top: 4px; }
+  .invoice-title { font-size: 28px; font-weight: 700; color: #0a0c0f; text-align: right; }
+  .invoice-num { font-size: 12px; color: #666; text-align: right; }
+  .info-section { display: flex; justify-content: space-between; margin-bottom: 40px; }
+  .info-block h4 { font-size: 11px; text-transform: uppercase; color: #999; letter-spacing: 1px; margin-bottom: 8px; }
+  .info-block p { font-size: 14px; color: #1a1a1a; margin: 2px 0; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+  th { background: #0a0c0f; color: #fff; padding: 12px 16px; text-align: left; font-size: 12px; text-transform: uppercase; }
+  td { padding: 14px 16px; border-bottom: 1px solid #eee; font-size: 14px; }
+  .total-row { background: #f8f8f8; font-weight: 700; }
+  .total-amount { font-size: 18px; color: #0a0c0f; }
+  .footer { text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #eee; font-size: 11px; color: #999; }
+  .badge { display: inline-block; background: #00e5a0; color: #000; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; }
+  @media print { body { padding: 20px; } }
 </style>
 </head>
 <body>
@@ -569,12 +813,14 @@ function generateInvoicePDF(date, plan, amount, userName, userEmail) {
   </div>
   <div class="info-block">
     <h4>Facturat către</h4>
-    <p><strong>${name || 'Client'}</strong></p>
-    <p>${email || ''}</p>
+    <p><strong>${userName || 'Client'}</strong></p>
+    <p>${userEmail || ''}</p>
   </div>
 </div>
 <table>
-  <thead><tr><th>Descriere</th><th>Perioadă</th><th>Total</th></tr></thead>
+  <thead>
+    <tr><th>Descriere</th><th>Perioadă</th><th>Total</th></tr>
+  </thead>
   <tbody>
     <tr>
       <td><strong>${plan}</strong><br><span style="font-size:12px;color:#666">Abonament EA Strategies — acces strategii MT5</span></td>
@@ -592,7 +838,7 @@ function generateInvoicePDF(date, plan, amount, userName, userEmail) {
   <p>Pentru întrebări: contact@ea-strategies.com</p>
   <p style="margin-top:8px;color:#ccc">Acest document a fost generat automat</p>
 </div>
-<script>window.onload=function(){window.print();}<\/script>
+<scr"+"ipt>window.onload = function(){ window.print(); }</scr"+"ipt>
 </body>
 </html>`);
   win.document.close();
@@ -606,26 +852,16 @@ const bmap={'ro':0,'en':1,'de':2};
 if(btns[bmap[det]]) btns[bmap[det]].classList.add('active');
 applyLang(det);
 
-show('viewLoading');
-sb.auth.getSession().then(({ data }) => {
-  const session = data?.session;
+// Check session — încarcă din Supabase dacă suntem logați
+(async()=>{
+  const { data:{ session } } = await sb.auth.getSession();
   if(session && session.user){
-    renderPortal({
-      name:  session.user.user_metadata?.full_name || session.user.email,
-      email: session.user.email,
-      ...DEMO
-    });
+    const userData = await loadUserDataFromSupabase(session.user);
+    renderPortal(userData);
   } else {
     show('viewLogin'); showForm('login');
   }
-}).catch(() => {
-  show('viewLogin'); showForm('login');
-});
-</script>
-<script>
-if('serviceWorker' in navigator){
-  navigator.serviceWorker.register('/sw.js').catch(()=>{});
-}
+})();
 </script>
 </body>
 </html>
