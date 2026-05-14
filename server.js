@@ -224,41 +224,105 @@ function adminAuth(req, res, next) {
   next();
 }
 
-// ─── Verificare licență (cu HMAC + Timestamp backwards compat) ────────────────
+// ─── Verificare licență (cu HMAC + Timestamp + Multi-source) ──────────────────
+// 🆕 SESIUNEA 4: Caută întâi în tabelele NOI (mt5_accounts + subscriptions),
+//               apoi fallback la tabela veche `licenses` pentru backwards compat
 app.get('/api/check', async (req, res) => {
-  const { account, ts } = req.query; // 🔐 NOU: extrag și ts
+  const { account, ts } = req.query;
   const ip = req.ip;
   if (!account) { await logAccess(null, ip, 'MISSING_ACCOUNT'); return res.status(400).send('INVALID'); }
 
-  // 🔐 NOU: Verificare timestamp pentru anti-replay (doar dacă EA-ul îl trimite)
+  // 🔐 Verificare timestamp pentru anti-replay
   if (ts) {
     const clientTime = parseInt(ts, 10);
     const serverTime = Math.floor(Date.now() / 1000);
     const diff = Math.abs(serverTime - clientTime);
     if (diff > TIMESTAMP_WINDOW_SECONDS) {
       await logAccess(account, ip, 'TIMESTAMP_INVALID');
+      await logAccessV2(null, account, null, ip, 'TIMESTAMP_INVALID', false, false);
       return res.send('INVALID');
     }
   }
 
-  const result = await pool.query('SELECT * FROM licenses WHERE account_id=$1', [account]);
-  const row = result.rows[0];
-
   // Funcție helper pentru a forma răspunsul cu/fără HMAC
   const buildResponse = (baseResponse) => {
-    // 🔐 NOU: Dacă EA-ul a trimis ts + avem HMAC_SECRET → format nou
     if (ts && HMAC_SECRET) {
       const serverTs = Math.floor(Date.now() / 1000);
       const payload = `${baseResponse}|${serverTs}`;
       const hmac = generateHMAC(payload);
       return `${payload}|${hmac}`;
     }
-    // Format vechi (backwards compat)
     return baseResponse;
   };
 
-  if (!row) { await logAccess(account, ip, 'NOT_FOUND'); return res.send(buildResponse('INVALID')); }
-  if (row.status === 'suspended') { await logAccess(account, ip, 'SUSPENDED'); return res.send(buildResponse('SUSPENDED')); }
+  // 🆕 PRIORITATE 1: Caută în tabelele NOI (users + subscriptions + mt5_accounts)
+  try {
+    const newSystemQuery = await pool.query(`
+      SELECT 
+        u.id AS user_id,
+        u.email,
+        s.id AS subscription_id,
+        s.plan,
+        s.status AS sub_status,
+        s.current_period_end,
+        s.grace_period_until,
+        m.account_number,
+        m.is_active AS account_active
+      FROM mt5_accounts m
+      JOIN users u ON u.id = m.user_id
+      LEFT JOIN subscriptions s ON s.id = m.subscription_id
+      WHERE m.account_number = $1 AND m.is_active = true
+      LIMIT 1
+    `, [account]);
+
+    if (newSystemQuery.rows.length > 0) {
+      const r = newSystemQuery.rows[0];
+      const now = new Date();
+      const expiry = r.current_period_end ? new Date(r.current_period_end) : null;
+
+      // Verificări status
+      if (r.sub_status === 'cancelled') {
+        await logAccess(account, ip, 'CANCELLED');
+        await logAccessV2(r.user_id, account, null, ip, 'CANCELLED', true, true);
+        return res.send(buildResponse('SUSPENDED'));
+      }
+      if (r.sub_status === 'expired' || (expiry && now > expiry)) {
+        await logAccess(account, ip, 'EXPIRED');
+        await logAccessV2(r.user_id, account, null, ip, 'EXPIRED_NEW', true, true);
+        return res.send(buildResponse('EXPIRED'));
+      }
+      if (r.sub_status !== 'active' && r.sub_status !== 'grace_period') {
+        await logAccess(account, ip, 'INACTIVE');
+        await logAccessV2(r.user_id, account, null, ip, 'INACTIVE', true, true);
+        return res.send(buildResponse('SUSPENDED'));
+      }
+
+      // Tot OK — calculează zile rămase
+      const expiryStr = expiry ? expiry.toISOString().split('T')[0] : '2099-12-31';
+      const daysLeft = expiry ? Math.ceil((expiry - now) / (1000 * 60 * 60 * 24)) : 9999;
+      await logAccess(account, ip, 'VALID_NEW');
+      await logAccessV2(r.user_id, account, null, ip, 'VALID_NEW', true, true);
+      return res.send(buildResponse(`VALID|${expiryStr}|${daysLeft}`));
+    }
+  } catch (e) {
+    console.error('New system lookup error:', e.message);
+    // Nu blocăm — încercăm fallback la tabela veche
+  }
+
+  // 🔁 PRIORITATE 2 (FALLBACK): Tabela veche `licenses` — backwards compat
+  const result = await pool.query('SELECT * FROM licenses WHERE account_id=$1', [account]);
+  const row = result.rows[0];
+
+  if (!row) { 
+    await logAccess(account, ip, 'NOT_FOUND'); 
+    await logAccessV2(null, account, null, ip, 'NOT_FOUND', true, true);
+    return res.send(buildResponse('INVALID')); 
+  }
+  if (row.status === 'suspended') { 
+    await logAccess(account, ip, 'SUSPENDED'); 
+    await logAccessV2(null, account, null, ip, 'SUSPENDED', true, true);
+    return res.send(buildResponse('SUSPENDED')); 
+  }
 
   const now = new Date();
   const expiry = new Date(row.expires_at);
@@ -266,11 +330,13 @@ app.get('/api/check', async (req, res) => {
     await pool.query("UPDATE licenses SET status='expired' WHERE account_id=$1", [account]);
     if (row.email) await removeDiscordRole(row.email);
     await logAccess(account, ip, 'EXPIRED');
+    await logAccessV2(null, account, null, ip, 'EXPIRED_OLD', true, true);
     return res.send(buildResponse('EXPIRED'));
   }
 
   const daysLeft = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
-  await logAccess(account, ip, 'VALID');
+  await logAccess(account, ip, 'VALID_OLD');
+  await logAccessV2(null, account, null, ip, 'VALID_OLD', true, true);
   return res.send(buildResponse(`VALID|${row.expires_at}|${daysLeft}`));
 });
 
@@ -520,6 +586,16 @@ app.get('/admin/logs', adminAuth, async (req, res) => {
 async function logAccess(account, ip, result) {
   try {
     await pool.query('INSERT INTO access_log (account_id, ip, result) VALUES ($1,$2,$3)', [account, ip, result]);
+  } catch (_) {}
+}
+
+// 🆕 SESIUNEA 4: Logging extins în access_log_v2 cu detalii HMAC + user_id
+async function logAccessV2(userId, account, eaName, ip, result, hmacValid, timestampValid) {
+  try {
+    await pool.query(
+      'INSERT INTO access_log_v2 (user_id, account_number, ea_name, ip, result, hmac_valid, timestamp_valid) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+      [userId, account, eaName, ip, result, hmacValid, timestampValid]
+    );
   } catch (_) {}
 }
 
