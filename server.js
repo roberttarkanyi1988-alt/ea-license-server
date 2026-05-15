@@ -132,6 +132,9 @@ if (process.env.DISCORD_BOT_TOKEN) {
   });
 }
 
+// 🆕 SESIUNEA 8: Discord ID-ul OWNER-ului (Robert) — exclus de la kick/role removal
+const DISCORD_OWNER_ID = '928628118149816330';
+
 function getRoleIdForPlan(plan) {
   if (!plan) return DISCORD_ROLES.basic;
   const p = plan.toLowerCase();
@@ -198,6 +201,12 @@ async function removeDiscordRole(email, sendDM = false, reason = '') {
     const dRow = await getDiscordIdByEmail(email);
     if (!dRow) return false;
     
+    // 🛡️ PROTECȚIE OWNER: nu șterge rolurile OWNER-ului niciodată
+    if (dRow.discord_user_id === DISCORD_OWNER_ID) {
+      console.log(`🛡️ Skip removeDiscordRole pentru OWNER (${email})`);
+      return false;
+    }
+    
     const guild = await discordClient.guilds.fetch(DISCORD_GUILD_ID);
     const member = await guild.members.fetch(dRow.discord_user_id).catch(() => null);
     if (!member) return false;
@@ -236,6 +245,12 @@ async function kickFromDiscord(email) {
     
     const dRow = await getDiscordIdByEmail(email);
     if (!dRow) return false;
+    
+    // 🛡️ PROTECȚIE OWNER: nu da NICIODATĂ kick OWNER-ului
+    if (dRow.discord_user_id === DISCORD_OWNER_ID) {
+      console.log(`🛡️ Skip kickFromDiscord pentru OWNER (${email})`);
+      return false;
+    }
     
     const guild = await discordClient.guilds.fetch(DISCORD_GUILD_ID);
     const member = await guild.members.fetch(dRow.discord_user_id).catch(() => null);
