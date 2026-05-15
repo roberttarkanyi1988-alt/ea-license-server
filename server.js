@@ -350,6 +350,76 @@ app.get('/api/hmac-test', (req, res) => {
   });
 });
 
+// ─── Discord OAuth ────────────────────────────────────────────────────────────
+const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID;
+const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
+
+app.get('/auth/discord', (req, res) => {
+  const redirectUri = 'https://ea-license-server-lrsl.onrender.com/auth/discord/callback';
+  const scope = 'identify email guilds.join';
+  const authUrl = `https://discord.com/api/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}`;
+  res.redirect(authUrl);
+});
+
+app.get('/auth/discord/callback', async (req, res) => {
+  const { code } = req.query;
+  if (!code) return res.status(400).send('Missing code');
+
+  try {
+    // Exchange code for token
+    const tokenRes = await fetch('https://discord.com/api/oauth2/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: DISCORD_CLIENT_ID,
+        client_secret: DISCORD_CLIENT_SECRET,
+        grant_type: 'authorization_code',
+        code: code,
+        redirect_uri: 'https://ea-license-server-lrsl.onrender.com/auth/discord/callback'
+      })
+    });
+    const tokenData = await tokenRes.json();
+
+    if (!tokenData.access_token) {
+      console.error('Discord OAuth error:', tokenData);
+      return res.status(500).send('Failed to get access token');
+    }
+
+    // Get user info
+    const userRes = await fetch('https://discord.com/api/users/@me', {
+      headers: { Authorization: `Bearer ${tokenData.access_token}` }
+    });
+    const userData = await userRes.json();
+
+    // Save discord_user_id to Supabase users table (match by email from session)
+    // Note: Clientul trebuie să fie deja logat în portal cu Supabase auth
+    // Discord email matches Supabase auth email
+    const discordEmail = userData.email;
+    const discordUserId = userData.id;
+    const discordUsername = `${userData.username}#${userData.discriminator}`;
+
+    if (discordEmail) {
+      await pool.query(
+        'UPDATE users SET discord_user_id=$1, discord_username=$2 WHERE email=$3',
+        [discordUserId, discordUsername, discordEmail]
+      );
+      console.log(`✅ Discord conectat: ${discordEmail} → ${discordUserId}`);
+    }
+
+    // Redirect înapoi la portal
+    res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:50px;background:#0a0c0f;color:#e8eaf0;">
+      <h1 style="color:#00e5a0;">✅ Discord conectat!</h1>
+      <p>Contul tău Discord a fost conectat cu succes.</p>
+      <a href="/client" style="color:#00e5a0;">Înapoi la portal →</a>
+      <script>setTimeout(() => window.location.href='/client', 2000);</script>
+    </body></html>`);
+
+  } catch (err) {
+    console.error('Discord OAuth error:', err);
+    res.status(500).send('OAuth error');
+  }
+});
+
 // ─── Stripe: Creare link plată ────────────────────────────────────────────────
 // Acum acceptă și plan + eas din landing page
 app.post('/api/create-payment', async (req, res) => {
