@@ -140,18 +140,49 @@ function getRoleIdForPlan(plan) {
   return DISCORD_ROLES.basic;
 }
 
+// 🆕 SESIUNEA 8: Funcție unificată — caută user după email, ia discord_user_id din DB
+async function getDiscordIdByEmail(email) {
+  try {
+    const r = await pool.query('SELECT discord_user_id, discord_username FROM users WHERE email=$1 LIMIT 1', [email]);
+    if (r.rows[0] && r.rows[0].discord_user_id) return r.rows[0];
+    return null;
+  } catch (e) {
+    console.error('getDiscordIdByEmail error:', e.message);
+    return null;
+  }
+}
+
+// 🆕 SESIUNEA 8: Adaugă rol folosind discord_user_id direct (mult mai sigur decât căutare după username)
 async function addDiscordRole(email, plan) {
   try {
-    if (!discordClient.isReady()) return false;
+    if (!discordClient.isReady()) { console.log('Discord bot nu e gata'); return false; }
+    
+    const dRow = await getDiscordIdByEmail(email);
+    if (!dRow) { console.log(`Discord: ${email} n-are discord_user_id în DB (clientul trebuie să conecteze Discord în portal)`); return false; }
+    
     const guild = await discordClient.guilds.fetch(DISCORD_GUILD_ID);
-    const members = await guild.members.fetch();
-    const member = members.find(m =>
-      m.user.username.toLowerCase().includes(email.split('@')[0].toLowerCase())
-    );
-    if (!member) { console.log(`Discord: ${email} negăsit`); return false; }
+    const member = await guild.members.fetch(dRow.discord_user_id).catch(() => null);
+    if (!member) { console.log(`Discord: user ${dRow.discord_user_id} nu e pe server`); return false; }
+    
     const roleId = getRoleIdForPlan(plan);
     await member.roles.add(roleId);
-    console.log(`✅ Discord: rol ${plan} adăugat pentru ${email}`);
+    console.log(`✅ Discord: rol ${plan} adăugat pentru ${email} (${dRow.discord_user_id})`);
+    
+    // Log în discord_events
+    await pool.query(
+      'INSERT INTO discord_events (user_id, discord_user_id, event_type, role_name, details) VALUES ((SELECT id FROM users WHERE email=$1), $2, $3, $4, $5)',
+      [email, dRow.discord_user_id, 'role_added', plan, `Plan ${plan} activat`]
+    );
+    
+    // DM bun venit
+    try {
+      await member.send(`🎉 Bine ai venit! Rolul **${plan.toUpperCase()}** a fost activat pe contul tău EA Strategies. Acces VIP deschis! 💎`);
+      await pool.query(
+        'INSERT INTO discord_events (user_id, discord_user_id, event_type, details) VALUES ((SELECT id FROM users WHERE email=$1), $2, $3, $4)',
+        [email, dRow.discord_user_id, 'dm_sent', 'Welcome DM']
+      );
+    } catch (e) { console.log('DM bun venit eșuat (user are DM închise):', e.message); }
+    
     return true;
   } catch(e) {
     console.error('Discord addRole error:', e.message);
@@ -159,19 +190,38 @@ async function addDiscordRole(email, plan) {
   }
 }
 
-async function removeDiscordRole(email) {
+// 🆕 SESIUNEA 8: Șterge TOATE rolurile + opțional DM de informare
+async function removeDiscordRole(email, sendDM = false, reason = '') {
   try {
     if (!discordClient.isReady()) return false;
+    
+    const dRow = await getDiscordIdByEmail(email);
+    if (!dRow) return false;
+    
     const guild = await discordClient.guilds.fetch(DISCORD_GUILD_ID);
-    const members = await guild.members.fetch();
-    const member = members.find(m =>
-      m.user.username.toLowerCase().includes(email.split('@')[0].toLowerCase())
-    );
-    if (!member) { console.log(`Discord: ${email} negăsit`); return false; }
+    const member = await guild.members.fetch(dRow.discord_user_id).catch(() => null);
+    if (!member) return false;
+    
     for (const roleId of Object.values(DISCORD_ROLES)) {
       if (member.roles.cache.has(roleId)) await member.roles.remove(roleId);
     }
     console.log(`✅ Discord: roluri șterse pentru ${email}`);
+    
+    await pool.query(
+      'INSERT INTO discord_events (user_id, discord_user_id, event_type, details) VALUES ((SELECT id FROM users WHERE email=$1), $2, $3, $4)',
+      [email, dRow.discord_user_id, 'role_removed', reason || 'Abonament expirat']
+    );
+    
+    if (sendDM) {
+      try {
+        await member.send(`⚠️ Abonamentul EA Strategies a expirat. Ai **30 zile** să-l reînnoiești înainte să fii înlăturat de pe server. Reînnoiește aici: https://ea-license-server-lrsl.onrender.com/landing`);
+        await pool.query(
+          'INSERT INTO discord_events (user_id, discord_user_id, event_type, details) VALUES ((SELECT id FROM users WHERE email=$1), $2, $3, $4)',
+          [email, dRow.discord_user_id, 'dm_sent', 'Expiry warning']
+        );
+      } catch (e) { console.log('DM expiry eșuat:', e.message); }
+    }
+    
     return true;
   } catch(e) {
     console.error('Discord removeRole error:', e.message);
@@ -179,15 +229,48 @@ async function removeDiscordRole(email) {
   }
 }
 
-// ─── Verificare zilnică ───────────────────────────────────────────────────────
+// 🆕 SESIUNEA 8: Kick de pe server (după 30 zile grace period)
+async function kickFromDiscord(email) {
+  try {
+    if (!discordClient.isReady()) return false;
+    
+    const dRow = await getDiscordIdByEmail(email);
+    if (!dRow) return false;
+    
+    const guild = await discordClient.guilds.fetch(DISCORD_GUILD_ID);
+    const member = await guild.members.fetch(dRow.discord_user_id).catch(() => null);
+    if (!member) return false;
+    
+    // DM înainte de kick
+    try {
+      await member.send(`👋 Au trecut 30 zile de la expirarea abonamentului. Te-am scos de pe server. Te așteptăm înapoi oricând: https://ea-license-server-lrsl.onrender.com/landing`);
+    } catch (e) { /* DM închise, dă mai departe */ }
+    
+    await member.kick('Subscription expired 30+ days');
+    console.log(`✅ Discord: ${email} kicked după grace period`);
+    
+    await pool.query(
+      'INSERT INTO discord_events (user_id, discord_user_id, event_type, details) VALUES ((SELECT id FROM users WHERE email=$1), $2, $3, $4)',
+      [email, dRow.discord_user_id, 'kicked', '30 zile grace period expirate']
+    );
+    
+    return true;
+  } catch (e) {
+    console.error('Discord kick error:', e.message);
+    return false;
+  }
+}
+
+// ─── 🆕 SESIUNEA 8: Verificare zilnică (3-tier: warn, expire+grace, kick) ──────
 async function checkExpiringLicenses() {
   try {
-    const result = await pool.query(`
+    // 1. Avertismente: expiră în 7, 3, 1 zi → DOAR Telegram pentru tine
+    const expiringWarn = await pool.query(`
       SELECT * FROM licenses 
       WHERE status = 'active' 
       AND expires_at::date - CURRENT_DATE IN (7, 3, 1)
     `);
-    for (const row of result.rows) {
+    for (const row of expiringWarn.rows) {
       const daysLeft = Math.ceil((new Date(row.expires_at) - new Date()) / 86400000);
       await sendTelegram(
         `⚠️ <b>Abonament expiră în ${daysLeft} zile!</b>\n` +
@@ -196,13 +279,63 @@ async function checkExpiringLicenses() {
         `📅 Expiră: ${row.expires_at}`
       );
     }
-    const expired = await pool.query(`
+    
+    // 2. Tocmai expirate → marchează expired, șterge rol, DM cu 30 zile grace
+    const justExpired = await pool.query(`
       SELECT * FROM licenses WHERE status = 'active' AND expires_at::date < CURRENT_DATE
     `);
-    for (const row of expired.rows) {
-      if (row.email) await removeDiscordRole(row.email);
+    for (const row of justExpired.rows) {
+      if (row.email) await removeDiscordRole(row.email, true, 'Abonament expirat — grace 30 zile');
       await pool.query("UPDATE licenses SET status='expired' WHERE account_id=$1", [row.account_id]);
+      await sendTelegram(`❌ <b>Abonament expirat!</b>\n👤 #${row.account_id}\n📧 ${row.email || '—'}\n⏰ Grace 30 zile activ`);
     }
+    
+    // 3. Grace period 30+ zile expirat → KICK
+    const graceExpired = await pool.query(`
+      SELECT * FROM licenses 
+      WHERE status = 'expired' 
+      AND expires_at::date < CURRENT_DATE - INTERVAL '30 days'
+      AND email IS NOT NULL
+    `);
+    for (const row of graceExpired.rows) {
+      const kicked = await kickFromDiscord(row.email);
+      if (kicked) {
+        await pool.query("UPDATE licenses SET status='kicked' WHERE account_id=$1", [row.account_id]);
+        await sendTelegram(`👋 <b>Kick Discord:</b> ${row.email} (grace 30 zile expirat)`);
+      }
+    }
+    
+    // 4. Verifică și subscriptions noi (tabela mt5_accounts)
+    const newExpired = await pool.query(`
+      SELECT s.id, s.user_id, u.email, s.current_period_end
+      FROM subscriptions s
+      JOIN users u ON u.id = s.user_id
+      WHERE s.status = 'active' AND s.current_period_end < NOW()
+    `);
+    for (const row of newExpired.rows) {
+      await removeDiscordRole(row.email, true, 'Subscription expirat — grace 30 zile');
+      await pool.query(
+        "UPDATE subscriptions SET status='grace_period', grace_period_until=NOW() + INTERVAL '30 days' WHERE id=$1",
+        [row.id]
+      );
+      await sendTelegram(`❌ <b>Subscription expirat (nou):</b>\n📧 ${row.email}\n⏰ Grace 30 zile`);
+    }
+    
+    // 5. Grace period nou expirat → KICK + status expired
+    const newKick = await pool.query(`
+      SELECT s.id, s.user_id, u.email
+      FROM subscriptions s
+      JOIN users u ON u.id = s.user_id
+      WHERE s.status = 'grace_period' AND s.grace_period_until < NOW()
+    `);
+    for (const row of newKick.rows) {
+      const kicked = await kickFromDiscord(row.email);
+      if (kicked) {
+        await pool.query("UPDATE subscriptions SET status='expired' WHERE id=$1", [row.id]);
+        await sendTelegram(`👋 <b>Kick Discord (nou):</b> ${row.email}`);
+      }
+    }
+    
   } catch(e) {
     console.error('Expiry check error:', e.message);
   }
@@ -434,6 +567,31 @@ app.get('/auth/discord/callback', async (req, res) => {
   } catch (err) {
     console.error('Discord OAuth error:', err);
     res.status(500).send('OAuth error');
+  }
+});
+
+// 🆕 SESIUNEA 8: Endpoint test bot Discord (verifică că botul răspunde + DB e ok)
+app.get('/api/discord-test', async (req, res) => {
+  try {
+    const botReady = discordClient.isReady();
+    const botTag = botReady ? discordClient.user.tag : null;
+    
+    // Verifică câți useri au discord_user_id setat
+    const connected = await pool.query('SELECT COUNT(*) FROM users WHERE discord_user_id IS NOT NULL');
+    
+    // Ultimele 5 evenimente Discord
+    const events = await pool.query('SELECT event_type, role_name, details, created_at FROM discord_events ORDER BY id DESC LIMIT 5');
+    
+    res.json({
+      bot_ready: botReady,
+      bot_tag: botTag,
+      guild_id: DISCORD_GUILD_ID,
+      roles: DISCORD_ROLES,
+      users_with_discord: parseInt(connected.rows[0].count),
+      recent_events: events.rows
+    });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
   }
 });
 
