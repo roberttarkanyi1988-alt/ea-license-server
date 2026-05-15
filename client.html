@@ -221,7 +221,7 @@ nav{position:fixed;top:0;left:0;right:0;z-index:200;background:rgba(10,12,15,0.9
         <div class="discord-title" data-t="disc-title">Conectează Discord</div>
         <div class="discord-desc" data-t="disc-desc">Conectează contul Discord pentru rol automat și acces VIP.</div>
       </div>
-      <a href="/auth/discord" class="discord-btn" data-t="disc-btn">Conectează</a>
+      <a href="#" onclick="connectDiscord(event)" class="discord-btn" data-t="disc-btn">Conectează</a>
     </div>
 
     <div class="sec-title" data-t="sec-actions">Acțiuni rapide</div>
@@ -760,6 +760,17 @@ async function doLogout(){
   currentEmail = null;
   currentUserData = {};
   show('viewLogin'); showForm('login');
+}
+
+// ── 🆕 CONECTARE DISCORD ──────────────────────────────────────────────────────
+function connectDiscord(e){
+  if(e) e.preventDefault();
+  if(!currentEmail){
+    alert('Trebuie să fii logat pentru a conecta Discord.');
+    return;
+  }
+  // Trimitem emailul prin URL ca să-l recuperăm la callback
+  window.location.href = '/auth/discord?email=' + encodeURIComponent(currentEmail);
 }
 
 
