@@ -498,6 +498,40 @@ app.get('/api/hmac-test', (req, res) => {
   });
 });
 
+// 🆕 SESIUNEA 8: Stripe Customer Portal — clientul gestionează singur abonamentul
+app.post('/api/customer-portal', async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: 'Email required' });
+  
+  try {
+    // Caut user-ul în DB
+    const userResult = await pool.query('SELECT stripe_customer_id FROM users WHERE email=$1 LIMIT 1', [email]);
+    let customerId = userResult.rows[0]?.stripe_customer_id;
+    
+    // Dacă nu avem stripe_customer_id salvat, îl găsim/creem
+    if (!customerId) {
+      const customers = await stripe.customers.list({ email, limit: 1 });
+      if (customers.data.length > 0) {
+        customerId = customers.data[0].id;
+        await pool.query('UPDATE users SET stripe_customer_id=$1 WHERE email=$2', [customerId, email]);
+      } else {
+        return res.status(404).json({ error: 'No subscription found for this email' });
+      }
+    }
+    
+    // Creează sesiune Customer Portal
+    const session = await stripe.billingPortal.sessions.create({
+      customer: customerId,
+      return_url: 'https://ea-license-server-lrsl.onrender.com/client'
+    });
+    
+    res.json({ url: session.url });
+  } catch (e) {
+    console.error('Customer portal error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── Discord OAuth ────────────────────────────────────────────────────────────
 const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
