@@ -399,19 +399,20 @@ app.get('/auth/discord/callback', async (req, res) => {
     const discordUsername = `${userData.username}#${userData.discriminator}`;
 
     if (discordEmail) {
-      await pool.query(
-        'UPDATE users SET discord_user_id=$1, discord_username=$2 WHERE email=$3',
+      const upd = await pool.query(
+        'UPDATE users SET discord_user_id=$1, discord_username=$2 WHERE email=$3 RETURNING id',
         [discordUserId, discordUsername, discordEmail]
       );
-      console.log(`✅ Discord conectat: ${discordEmail} → ${discordUserId}`);
+      console.log(`Discord OAuth: email=${discordEmail} id=${discordUserId} updated_rows=${upd.rowCount}`);
     }
 
-    // Redirect înapoi la portal
+    // Redirect înapoi la portal cu debug info
     res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:50px;background:#0a0c0f;color:#e8eaf0;">
       <h1 style="color:#00e5a0;">✅ Discord conectat!</h1>
-      <p>Contul tău Discord a fost conectat cu succes.</p>
+      <p>Email Discord: <b>${discordEmail || 'NULL'}</b></p>
+      <p>Discord ID: <b>${discordUserId}</b></p>
+      <p>Username: <b>${discordUsername}</b></p>
       <a href="/client" style="color:#00e5a0;">Înapoi la portal →</a>
-      <script>setTimeout(() => window.location.href='/client', 2000);</script>
     </body></html>`);
 
   } catch (err) {
