@@ -284,7 +284,13 @@ const T = {
     'acct-err-save':'Eroare la salvare. Încearcă din nou.',
     'confirm-rm':'Elimini contul ','placeholder-acct':'Număr cont MT5...',
     'no-licenses':'Nu ai licențe active. Cumpără un abonament pentru a începe.',
-    'no-invoices':'Nu ai facturi încă.'
+    'no-invoices':'Nu ai facturi încă.',
+    'must-login':'Trebuie să fii logat.',
+    'no-subscription':'Nu am găsit abonament. Cumpără un plan mai întâi.',
+    'connection-error':'Eroare conexiune. Încearcă din nou.',
+    'no-eas':'Nu ai EA-uri active. Cumpără un plan mai întâi.',
+    'active-eas':'EA-urile tale active:',
+    'download-info':'⬇ Pentru descărcare: mergi pe canalul #downloads de pe Discord sau deschide un ticket de suport.'
   },
   en:{
     'logout':'Sign out','loading':'Loading...',
@@ -309,7 +315,13 @@ const T = {
     'acct-err-save':'Save error. Try again.',
     'confirm-rm':'Remove account ','placeholder-acct':'MT5 account number...',
     'no-licenses':'No active licenses. Purchase a subscription to start.',
-    'no-invoices':'No invoices yet.'
+    'no-invoices':'No invoices yet.',
+    'must-login':'You must be logged in.',
+    'no-subscription':'No subscription found. Purchase a plan first.',
+    'connection-error':'Connection error. Try again.',
+    'no-eas':'No active EAs. Purchase a plan first.',
+    'active-eas':'Your active EAs:',
+    'download-info':'⬇ To download: go to the #downloads channel on Discord or open a support ticket.'
   },
   de:{
     'logout':'Abmelden','loading':'Wird geladen...',
@@ -334,7 +346,13 @@ const T = {
     'acct-err-save':'Speicherfehler. Versuchen Sie es erneut.',
     'confirm-rm':'Konto entfernen ','placeholder-acct':'MT5-Kontonummer...',
     'no-licenses':'Keine aktiven Lizenzen. Abonnement kaufen.',
-    'no-invoices':'Noch keine Rechnungen.'
+    'no-invoices':'Noch keine Rechnungen.',
+    'must-login':'Sie müssen angemeldet sein.',
+    'no-subscription':'Kein Abonnement gefunden. Kaufen Sie zuerst einen Plan.',
+    'connection-error':'Verbindungsfehler. Versuchen Sie es erneut.',
+    'no-eas':'Keine aktiven EAs. Kaufen Sie zuerst einen Plan.',
+    'active-eas':'Ihre aktiven EAs:',
+    'download-info':'⬇ Zum Herunterladen: gehen Sie zum #downloads-Kanal auf Discord oder eröffnen Sie ein Support-Ticket.'
   }
 };
 
@@ -756,7 +774,7 @@ async function doRegister(){
 // ── 🆕 ACȚIUNI RAPIDE — butoane funcționale ───────────────────────────────────
 async function openCustomerPortal(){
   if(!currentEmail){
-    alert('Trebuie să fii logat');
+    alert(t('must-login'));
     return;
   }
   try{
@@ -769,26 +787,25 @@ async function openCustomerPortal(){
     if(data.url){
       window.location.href = data.url;
     } else {
-      alert('Nu am găsit abonament. Cumpără un plan mai întâi.');
+      alert(t('no-subscription'));
     }
   }catch(e){
-    alert('Eroare conexiune. Încearcă din nou.');
+    alert(t('connection-error'));
   }
 }
 
 function downloadEA(){
   if(!currentUserData || !currentUserData.licenses || currentUserData.licenses.length === 0){
-    alert('Nu ai EA-uri active. Cumpără un plan mai întâi.');
+    alert(t('no-eas'));
     return;
   }
   
-  // Construim listă cu EA-urile clientului
   const eaList = currentUserData.licenses
     .filter(l => l.active)
     .map((l, i) => `${i+1}. ${l.ea}`)
     .join('\n');
   
-  alert('EA-urile tale active:\n\n' + eaList + '\n\n⬇ Pentru a descărca, mergi pe canalul #downloads de pe Discord, sau contactează suport prin ticket.');
+  alert(t('active-eas') + '\n\n' + eaList + '\n\n' + t('download-info'));
 }
 
 async function doLogout(){
