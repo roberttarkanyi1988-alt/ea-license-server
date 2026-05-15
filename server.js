@@ -570,6 +570,16 @@ app.get('/auth/discord/callback', async (req, res) => {
   }
 });
 
+// 🆕 SESIUNEA 8: Endpoint test rol din browser (protejat cu admin key în URL)
+app.get('/api/discord-give-role', async (req, res) => {
+  const { key, email, plan } = req.query;
+  if (key !== ADMIN_KEY) return res.status(401).json({ error: 'Wrong admin key' });
+  if (!email || !plan) return res.status(400).json({ error: 'Missing email or plan' });
+  
+  const result = await addDiscordRole(email, plan);
+  res.json({ success: result, email, plan });
+});
+
 // 🆕 SESIUNEA 8: Endpoint test bot Discord (verifică că botul răspunde + DB e ok)
 app.get('/api/discord-test', async (req, res) => {
   try {
