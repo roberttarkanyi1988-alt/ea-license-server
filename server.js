@@ -355,15 +355,29 @@ const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
 
 app.get('/auth/discord', (req, res) => {
+  const { email } = req.query;
+  if (!email) return res.status(400).send('Missing email — trebuie să fii logat în portal');
+  
   const redirectUri = 'https://ea-license-server-lrsl.onrender.com/auth/discord/callback';
   const scope = 'identify email guilds.join';
-  const authUrl = `https://discord.com/api/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}`;
+  // Encode email-ul portal în state (base64) ca să-l recuperăm la callback
+  const state = Buffer.from(email).toString('base64');
+  const authUrl = `https://discord.com/api/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&state=${state}`;
   res.redirect(authUrl);
 });
 
 app.get('/auth/discord/callback', async (req, res) => {
-  const { code } = req.query;
+  const { code, state } = req.query;
   if (!code) return res.status(400).send('Missing code');
+  if (!state) return res.status(400).send('Missing state');
+
+  // Decodez emailul portal din state
+  let portalEmail;
+  try {
+    portalEmail = Buffer.from(state, 'base64').toString('utf-8');
+  } catch (e) {
+    return res.status(400).send('Invalid state');
+  }
 
   try {
     // Exchange code for token
@@ -385,34 +399,36 @@ app.get('/auth/discord/callback', async (req, res) => {
       return res.status(500).send('Failed to get access token');
     }
 
-    // Get user info
+    // Get Discord user info
     const userRes = await fetch('https://discord.com/api/users/@me', {
       headers: { Authorization: `Bearer ${tokenData.access_token}` }
     });
     const userData = await userRes.json();
 
-    // Save discord_user_id to Supabase users table (match by email from session)
-    // Note: Clientul trebuie să fie deja logat în portal cu Supabase auth
-    // Discord email matches Supabase auth email
-    const discordEmail = userData.email;
     const discordUserId = userData.id;
-    const discordUsername = `${userData.username}#${userData.discriminator}`;
+    const discordUsername = userData.username + (userData.discriminator && userData.discriminator !== '0' ? `#${userData.discriminator}` : '');
 
-    if (discordEmail) {
-      const upd = await pool.query(
-        'UPDATE users SET discord_user_id=$1, discord_username=$2 WHERE email=$3 RETURNING id',
-        [discordUserId, discordUsername, discordEmail]
-      );
-      console.log(`Discord OAuth: email=${discordEmail} id=${discordUserId} updated_rows=${upd.rowCount}`);
+    // 🆕 Folosim EMAILUL DIN PORTAL (din state), nu emailul Discord
+    const upd = await pool.query(
+      'UPDATE users SET discord_user_id=$1, discord_username=$2 WHERE email=$3 RETURNING id',
+      [discordUserId, discordUsername, portalEmail]
+    );
+    console.log(`Discord OAuth: portal_email=${portalEmail} discord_id=${discordUserId} updated_rows=${upd.rowCount}`);
+
+    if (upd.rowCount === 0) {
+      return res.status(404).send(`<html><body style="font-family:sans-serif;text-align:center;padding:50px;background:#0a0c0f;color:#e8eaf0;">
+        <h1 style="color:#ff3d5a;">❌ Eroare</h1>
+        <p>Nu am găsit user-ul cu emailul: ${portalEmail}</p>
+        <a href="/client" style="color:#00e5a0;">Înapoi la portal →</a>
+      </body></html>`);
     }
 
-    // Redirect înapoi la portal cu debug info
+    // Redirect înapoi la portal
     res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:50px;background:#0a0c0f;color:#e8eaf0;">
       <h1 style="color:#00e5a0;">✅ Discord conectat!</h1>
-      <p>Email Discord: <b>${discordEmail || 'NULL'}</b></p>
-      <p>Discord ID: <b>${discordUserId}</b></p>
-      <p>Username: <b>${discordUsername}</b></p>
+      <p>Contul Discord <b>${discordUsername}</b> a fost conectat la <b>${portalEmail}</b></p>
       <a href="/client" style="color:#00e5a0;">Înapoi la portal →</a>
+      <script>setTimeout(() => window.location.href='/client', 2500);</script>
     </body></html>`);
 
   } catch (err) {
