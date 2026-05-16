@@ -545,6 +545,68 @@ app.post('/api/customer-portal', async (req, res) => {
   }
 });
 
+// 🆕 SESIUNEA 11: Download EA file cu signed URL temporary (5 min)
+const SUPABASE_URL = 'https://cxtbthwoffyeazlxzequ.supabase.co';
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || '';
+
+app.post('/api/download-ea', async (req, res) => {
+  const { email, ea_name } = req.body;
+  if (!email || !ea_name) return res.status(400).json({ error: 'Missing email or ea_name' });
+  
+  try {
+    // 1. Caut user-ul + verific licența activă pentru acest EA
+    const licCheck = await pool.query(`
+      SELECT el.file_name, el.status, u.id AS user_id
+      FROM ea_licenses el
+      JOIN users u ON u.id = el.user_id
+      WHERE u.email = $1 AND el.ea_name = $2 AND el.status = 'active'
+      LIMIT 1
+    `, [email, ea_name]);
+    
+    if (licCheck.rows.length === 0) {
+      return res.status(403).json({ error: 'Nu ai licență activă pentru acest EA' });
+    }
+    
+    const fileName = licCheck.rows[0].file_name;
+    if (!fileName) {
+      return res.status(404).json({ error: 'Fișier indisponibil. Contactează suport.' });
+    }
+    
+    // 2. Creez signed URL temporar (5 minute) via Supabase REST API
+    if (!SUPABASE_SERVICE_KEY) {
+      return res.status(500).json({ error: 'SUPABASE_SERVICE_KEY nu e setat în Render' });
+    }
+    
+    const signedUrlRes = await fetch(`${SUPABASE_URL}/storage/v1/object/sign/ea-files/${encodeURIComponent(fileName)}`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ expiresIn: 300 }) // 5 minute
+    });
+    
+    const data = await signedUrlRes.json();
+    if (!data.signedURL) {
+      console.error('Signed URL error:', data);
+      return res.status(500).json({ error: 'Nu am putut genera link de descărcare' });
+    }
+    
+    // Log download în access_log_v2
+    await logAccessV2(licCheck.rows[0].user_id, null, ea_name, req.ip, 'DOWNLOAD', true, true);
+    
+    res.json({ 
+      url: SUPABASE_URL + '/storage/v1' + data.signedURL,
+      file_name: fileName,
+      expires_in: 300
+    });
+    
+  } catch (e) {
+    console.error('Download error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── Discord OAuth ────────────────────────────────────────────────────────────
 const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
