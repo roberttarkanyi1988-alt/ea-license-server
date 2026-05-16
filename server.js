@@ -431,25 +431,38 @@ app.get('/api/check', async (req, res) => {
       // Verificări status
       if (r.sub_status === 'cancelled') {
         await logAccess(account, ip, 'CANCELLED');
-        await logAccessV2(r.user_id, account, null, ip, 'CANCELLED', true, true);
+        await logAccessV2(r.user_id, account, req.query.ea || null, ip, 'CANCELLED', true, true);
         return res.send(buildResponse('SUSPENDED'));
       }
       if (r.sub_status === 'expired' || (expiry && now > expiry)) {
         await logAccess(account, ip, 'EXPIRED');
-        await logAccessV2(r.user_id, account, null, ip, 'EXPIRED_NEW', true, true);
+        await logAccessV2(r.user_id, account, req.query.ea || null, ip, 'EXPIRED_NEW', true, true);
         return res.send(buildResponse('EXPIRED'));
       }
       if (r.sub_status !== 'active' && r.sub_status !== 'grace_period') {
         await logAccess(account, ip, 'INACTIVE');
-        await logAccessV2(r.user_id, account, null, ip, 'INACTIVE', true, true);
+        await logAccessV2(r.user_id, account, req.query.ea || null, ip, 'INACTIVE', true, true);
         return res.send(buildResponse('SUSPENDED'));
+      }
+
+      // 🆕 SESIUNEA 10: Verificare per EA — userul are licență pentru acest EA specific?
+      if (req.query.ea) {
+        const eaCheck = await pool.query(
+          `SELECT id FROM ea_licenses WHERE user_id=$1 AND ea_name=$2 AND status='active' LIMIT 1`,
+          [r.user_id, req.query.ea]
+        );
+        if (eaCheck.rows.length === 0) {
+          await logAccess(account, ip, 'EA_NOT_LICENSED');
+          await logAccessV2(r.user_id, account, req.query.ea, ip, 'EA_NOT_LICENSED', true, true);
+          return res.send(buildResponse('INVALID'));
+        }
       }
 
       // Tot OK — calculează zile rămase
       const expiryStr = expiry ? expiry.toISOString().split('T')[0] : '2099-12-31';
       const daysLeft = expiry ? Math.ceil((expiry - now) / (1000 * 60 * 60 * 24)) : 9999;
       await logAccess(account, ip, 'VALID_NEW');
-      await logAccessV2(r.user_id, account, null, ip, 'VALID_NEW', true, true);
+      await logAccessV2(r.user_id, account, req.query.ea || null, ip, 'VALID_NEW', true, true);
       return res.send(buildResponse(`VALID|${expiryStr}|${daysLeft}`));
     }
   } catch (e) {
