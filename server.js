@@ -616,6 +616,67 @@ app.post('/api/download-ea', async (req, res) => {
   }
 });
 
+// 🆕 SESIUNEA 12: Endpoint admin pentru detectare abuzuri
+app.get('/admin/abuse-report', adminAuth, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        u.id AS user_id,
+        u.email,
+        u.full_name,
+        u.created_at AS user_since,
+        COUNT(m.id) AS total_accounts,
+        COUNT(CASE WHEN m.is_active = true THEN 1 END) AS active_accounts,
+        COUNT(CASE WHEN m.is_active = false THEN 1 END) AS removed_accounts,
+        MAX(m.added_at) AS last_added,
+        MAX(m.removed_at) AS last_removed,
+        s.plan,
+        s.max_mt5_accounts
+      FROM users u
+      LEFT JOIN mt5_accounts m ON m.user_id = u.id
+      LEFT JOIN subscriptions s ON s.user_id = u.id AND s.status IN ('active', 'grace_period')
+      GROUP BY u.id, u.email, u.full_name, u.created_at, s.plan, s.max_mt5_accounts
+      HAVING COUNT(m.id) > 0
+      ORDER BY removed_accounts DESC, total_accounts DESC
+    `);
+    
+    // Calculez "risk score" pentru fiecare user
+    const enriched = result.rows.map(r => {
+      const removedCount = parseInt(r.removed_accounts);
+      const totalCount = parseInt(r.total_accounts);
+      const maxAllowed = parseInt(r.max_mt5_accounts) || 1;
+      
+      // Risc = câte conturi a folosit în total raportat la plan
+      const ratio = totalCount / maxAllowed;
+      let risk = 'low';
+      if (ratio >= 3) risk = 'high';
+      else if (ratio >= 2) risk = 'medium';
+      
+      return { ...r, risk_level: risk };
+    });
+    
+    res.json(enriched);
+  } catch (e) {
+    console.error('Abuse report error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// 🆕 Endpoint detalii conturi MT5 per user (istoric complet)
+app.get('/admin/user-accounts/:user_id', adminAuth, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT account_number, broker, is_active, added_at, removed_at
+      FROM mt5_accounts
+      WHERE user_id = $1
+      ORDER BY added_at DESC
+    `, [req.params.user_id]);
+    res.json(result.rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── Discord OAuth ────────────────────────────────────────────────────────────
 const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID;
 const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
