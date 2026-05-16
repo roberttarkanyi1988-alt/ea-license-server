@@ -36,7 +36,7 @@ nav{position:fixed;top:0;left:0;right:0;z-index:200;background:rgba(10,12,15,0.9
 .main{max-width:1100px;margin:0 auto;padding:80px 24px 60px;}
 
 /* TABS */
-.tabs{display:flex;gap:4px;margin-bottom:24px;border-bottom:1px solid var(--border);padding-bottom:0;}
+.tabs{display:flex;gap:4px;margin-bottom:24px;border-bottom:1px solid var(--border);padding-bottom:0;flex-wrap:wrap;}
 .tab{padding:8px 20px;font-size:12px;font-weight:600;cursor:pointer;color:var(--muted);border:none;background:none;font-family:var(--sans);border-bottom:2px solid transparent;margin-bottom:-1px;transition:all .2s;}
 .tab:hover{color:var(--text);}
 .tab.active{color:var(--accent);border-bottom-color:var(--accent);}
@@ -61,7 +61,7 @@ nav{position:fixed;top:0;left:0;right:0;z-index:200;background:rgba(10,12,15,0.9
 
 /* TABLE */
 .table-card{background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:20px;}
-.table-header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);}
+.table-header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);flex-wrap:wrap;gap:10px;}
 .table-title{font-size:12px;font-weight:600;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;}
 .search-input{padding:6px 12px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:12px;outline:none;width:200px;}
 .search-input:focus{border-color:var(--accent);}
@@ -103,6 +103,14 @@ tr:hover td{background:rgba(255,255,255,.02);}
 /* TWO COL */
 .two-col{display:grid;grid-template-columns:1.6fr 1fr;gap:16px;}
 
+/* MODAL */
+.modal-overlay{display:none;position:fixed;inset:0;z-index:500;background:rgba(0,0,0,.85);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:20px;}
+.modal-overlay.open{display:flex;}
+.modal{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:24px;width:100%;max-width:600px;max-height:80vh;overflow-y:auto;position:relative;}
+.modal-close{position:absolute;top:12px;right:14px;background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;}
+.modal-title{font-size:16px;font-weight:600;margin-bottom:4px;}
+.modal-sub{font-size:12px;color:var(--muted);margin-bottom:16px;}
+
 @media(max-width:768px){nav{padding:0 16px;}.main{padding:72px 16px 40px;}.two-col{grid-template-columns:1fr;}.metrics-grid{grid-template-columns:1fr 1fr;}}
 </style>
 </head>
@@ -135,6 +143,7 @@ tr:hover td{background:rgba(255,255,255,.02);}
     <div class="tabs">
       <button class="tab active" onclick="showTab('overview',this)">📊 Overview</button>
       <button class="tab" onclick="showTab('clients',this)">👥 Clienți</button>
+      <button class="tab" onclick="showTab('abuse',this)">🚨 Abuzuri</button>
       <button class="tab" onclick="showTab('add',this)">➕ Adaugă licență</button>
       <button class="tab" onclick="showTab('discord',this)">💬 Discord</button>
     </div>
@@ -201,6 +210,49 @@ tr:hover td{background:rgba(255,255,255,.02);}
       </div>
     </div>
 
+    <!-- 🆕 ABUSE TAB -->
+    <div id="tab-abuse" style="display:none">
+      <div class="metrics-grid" id="abuseMetrics">
+        <div class="metric"><div class="metric-lbl">🔴 Risc înalt</div><div class="metric-val red" id="abuseHigh">—</div><div class="metric-sub" style="color:var(--muted)">3x+ peste limită</div></div>
+        <div class="metric"><div class="metric-lbl">🟡 Risc mediu</div><div class="metric-val amber" id="abuseMed">—</div><div class="metric-sub" style="color:var(--muted)">2x peste limită</div></div>
+        <div class="metric"><div class="metric-lbl">🟢 Risc scăzut</div><div class="metric-val green" id="abuseLow">—</div><div class="metric-sub" style="color:var(--muted)">normal</div></div>
+        <div class="metric"><div class="metric-lbl">Total schimbări</div><div class="metric-val" id="abuseRemoved">—</div><div class="metric-sub" style="color:var(--muted)">conturi șterse</div></div>
+      </div>
+
+      <div class="table-card">
+        <div class="table-header">
+          <div class="table-title">📋 Comportament clienți — schimbări conturi MT5</div>
+          <button class="btn-secondary" onclick="loadAbuse()" style="padding:6px 14px;font-size:11px">↻ Refresh</button>
+        </div>
+        <div style="overflow-x:auto">
+          <table>
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Plan</th>
+                <th>Limită</th>
+                <th>Total folosite</th>
+                <th>Active</th>
+                <th>Șterse</th>
+                <th>Risc</th>
+                <th>Acțiuni</th>
+              </tr>
+            </thead>
+            <tbody id="abuseTable">
+              <tr><td colspan="8" style="text-align:center;color:var(--muted);padding:24px">Se încarcă...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;font-size:12px;color:var(--muted);line-height:1.6">
+        <b style="color:var(--text)">💡 Cum interpretezi:</b><br>
+        🟢 <b>Scăzut</b> = clientul folosește mai puțin sau exact cât are voie.<br>
+        🟡 <b>Mediu</b> = a folosit ~2x conturi mai multe decât plan permite (poate să schimbat o dată).<br>
+        🔴 <b>Înalt</b> = a folosit 3x+ conturi mai multe — investighează manual!
+      </div>
+    </div>
+
     <!-- ADD LICENSE TAB -->
     <div id="tab-add" style="display:none">
       <div class="form-card">
@@ -258,10 +310,21 @@ tr:hover td{background:rgba(255,255,255,.02);}
   </div>
 </div>
 
+<!-- 🆕 MODAL ISTORIC CONTURI -->
+<div class="modal-overlay" id="historyModal" onclick="closeHistoryModal(event)">
+  <div class="modal">
+    <button class="modal-close" onclick="closeHistoryModal()">✕</button>
+    <div class="modal-title" id="historyTitle">Istoric conturi MT5</div>
+    <div class="modal-sub" id="historySub">Toate conturile folosite de acest client</div>
+    <div id="historyContent" style="font-size:13px;">Se încarcă...</div>
+  </div>
+</div>
+
 <script>
 const SERVER = 'https://ea-license-server-lrsl.onrender.com';
 let ADMIN_KEY = '';
 let allClients = [];
+let allAbuse = [];
 
 function doLogin(){
   const key = document.getElementById('adminKey').value.trim();
@@ -291,10 +354,11 @@ function showDashboard(){
 function showTab(id, el){
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');
-  ['overview','clients','add','discord'].forEach(t=>{
+  ['overview','clients','abuse','add','discord'].forEach(t=>{
     document.getElementById('tab-'+t).style.display = t===id ? 'block' : 'none';
   });
   if(id==='clients') loadClients();
+  if(id==='abuse') loadAbuse();
 }
 
 async function loadAll(){
@@ -313,6 +377,101 @@ async function loadClients(){
   } catch(e){
     document.getElementById('clientsTable').innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--danger)">Eroare la încărcare!</td></tr>';
   }
+}
+
+// 🆕 ABUSE FUNCTIONS
+async function loadAbuse(){
+  try {
+    const r = await fetch(SERVER+'/admin/abuse-report', { headers:{ 'x-admin-key': ADMIN_KEY } });
+    allAbuse = await r.json();
+    renderAbuse(allAbuse);
+    updateAbuseMetrics();
+  } catch(e){
+    document.getElementById('abuseTable').innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--danger)">Eroare la încărcare!</td></tr>';
+  }
+}
+
+function renderAbuse(rows){
+  const tbody = document.getElementById('abuseTable');
+  if(!rows.length){ 
+    tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:24px">✅ Niciun client cu conturi MT5</td></tr>'; 
+    return; 
+  }
+  tbody.innerHTML = rows.map(r => {
+    let riskPill;
+    if(r.risk_level === 'high') riskPill = '<span class="pill pill-red">🔴 Înalt</span>';
+    else if(r.risk_level === 'medium') riskPill = '<span class="pill pill-amber">🟡 Mediu</span>';
+    else riskPill = '<span class="pill pill-green">🟢 Scăzut</span>';
+    
+    const planText = r.plan || '—';
+    const planPill = r.plan ? `<span class="pill pill-blue">${planText}</span>` : '<span style="color:var(--muted)">—</span>';
+    
+    return `<tr>
+      <td style="font-size:12px">${r.email||'—'}</td>
+      <td>${planPill}</td>
+      <td style="font-family:var(--mono);text-align:center">${r.max_mt5_accounts||'—'}</td>
+      <td style="font-family:var(--mono);text-align:center;font-weight:700">${r.total_accounts}</td>
+      <td style="font-family:var(--mono);color:var(--accent);text-align:center">${r.active_accounts}</td>
+      <td style="font-family:var(--mono);color:${r.removed_accounts>0?'var(--warn)':'var(--muted)'};text-align:center">${r.removed_accounts}</td>
+      <td>${riskPill}</td>
+      <td>
+        <button class="action-btn" onclick="viewHistory(${r.user_id},'${(r.email||'').replace(/'/g,"\\'")}')">📋 Istoric</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function updateAbuseMetrics(){
+  const high = allAbuse.filter(r => r.risk_level === 'high').length;
+  const med = allAbuse.filter(r => r.risk_level === 'medium').length;
+  const low = allAbuse.filter(r => r.risk_level === 'low').length;
+  const totalRemoved = allAbuse.reduce((sum, r) => sum + parseInt(r.removed_accounts), 0);
+  
+  document.getElementById('abuseHigh').textContent = high;
+  document.getElementById('abuseMed').textContent = med;
+  document.getElementById('abuseLow').textContent = low;
+  document.getElementById('abuseRemoved').textContent = totalRemoved;
+}
+
+async function viewHistory(userId, email){
+  document.getElementById('historyTitle').textContent = '📋 Istoric conturi MT5';
+  document.getElementById('historySub').textContent = email;
+  document.getElementById('historyContent').innerHTML = 'Se încarcă...';
+  document.getElementById('historyModal').classList.add('open');
+  
+  try {
+    const r = await fetch(SERVER+'/admin/user-accounts/'+userId, { headers:{ 'x-admin-key': ADMIN_KEY } });
+    const data = await r.json();
+    if(!data.length){
+      document.getElementById('historyContent').innerHTML = '<div style="color:var(--muted)">Niciun cont MT5 înregistrat</div>';
+      return;
+    }
+    
+    let html = '<table style="margin-top:8px"><thead><tr><th>Cont MT5</th><th>Broker</th><th>Status</th><th>Adăugat</th><th>Șters</th></tr></thead><tbody>';
+    data.forEach(a => {
+      const statusPill = a.is_active 
+        ? '<span class="pill pill-green">Activ</span>'
+        : '<span class="pill pill-red">Șters</span>';
+      const addedDate = a.added_at ? new Date(a.added_at).toLocaleDateString('ro-RO') : '—';
+      const removedDate = a.removed_at ? new Date(a.removed_at).toLocaleDateString('ro-RO') : '—';
+      html += `<tr>
+        <td style="font-family:var(--mono)">${a.account_number}</td>
+        <td style="color:var(--muted);font-size:12px">${a.broker||'—'}</td>
+        <td>${statusPill}</td>
+        <td style="font-size:12px">${addedDate}</td>
+        <td style="font-size:12px;color:${a.removed_at?'var(--warn)':'var(--muted)'}">${removedDate}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    document.getElementById('historyContent').innerHTML = html;
+  } catch(e){
+    document.getElementById('historyContent').innerHTML = '<div style="color:var(--danger)">Eroare la încărcare</div>';
+  }
+}
+
+function closeHistoryModal(e){
+  if(e && e.target.id !== 'historyModal' && e.target.className !== 'modal-close') return;
+  document.getElementById('historyModal').classList.remove('open');
 }
 
 function renderClients(clients){
