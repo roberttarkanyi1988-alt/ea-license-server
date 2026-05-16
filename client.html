@@ -800,12 +800,51 @@ function downloadEA(){
     return;
   }
   
-  const eaList = currentUserData.licenses
-    .filter(l => l.active)
-    .map((l, i) => `${i+1}. ${l.ea}`)
-    .join('\n');
+  const activeEAs = currentUserData.licenses.filter(l => l.active);
+  if(activeEAs.length === 0){
+    alert(t('no-eas'));
+    return;
+  }
   
-  alert(t('active-eas') + '\n\n' + eaList + '\n\n' + t('download-info'));
+  // Construim listă numerotată cu EA-uri
+  let msg = t('active-eas') + '\n\n';
+  activeEAs.forEach((l, i) => {
+    msg += `${i+1}. ${l.ea}\n`;
+  });
+  msg += '\n' + (lang === 'ro' ? 'Introdu numărul EA-ului pe care vrei să-l descarci (1-' + activeEAs.length + '):' :
+                  lang === 'en' ? 'Enter the number of the EA you want to download (1-' + activeEAs.length + '):' :
+                  'Geben Sie die Nummer des EA ein, den Sie herunterladen möchten (1-' + activeEAs.length + '):');
+  
+  const choice = prompt(msg);
+  if(!choice) return;
+  
+  const idx = parseInt(choice, 10) - 1;
+  if(isNaN(idx) || idx < 0 || idx >= activeEAs.length){
+    alert(lang === 'ro' ? 'Număr invalid' : lang === 'en' ? 'Invalid number' : 'Ungültige Nummer');
+    return;
+  }
+  
+  const selectedEA = activeEAs[idx];
+  doDownloadEA(selectedEA.ea);
+}
+
+async function doDownloadEA(eaName){
+  try{
+    const res = await fetch('/api/download-ea', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ email: currentEmail, ea_name: eaName })
+    });
+    const data = await res.json();
+    if(data.url){
+      // Deschid link-ul pentru descărcare automat
+      window.open(data.url, '_blank');
+    } else {
+      alert((lang === 'ro' ? 'Eroare: ' : lang === 'en' ? 'Error: ' : 'Fehler: ') + (data.error || 'unknown'));
+    }
+  }catch(e){
+    alert(t('connection-error'));
+  }
 }
 
 async function doLogout(){
