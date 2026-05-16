@@ -549,12 +549,26 @@ app.post('/api/customer-portal', async (req, res) => {
 const SUPABASE_URL = 'https://cxtbthwoffyeazlxzequ.supabase.co';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || '';
 
+// Inițializare Supabase client (pentru Storage signed URLs)
+let supabaseClient = null;
+try {
+  const { createClient } = require('@supabase/supabase-js');
+  if (SUPABASE_SERVICE_KEY) {
+    supabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
+    console.log('✅ Supabase client inițializat pentru Storage');
+  } else {
+    console.warn('⚠️  SUPABASE_SERVICE_KEY lipsește');
+  }
+} catch (e) {
+  console.error('Supabase init error:', e.message);
+}
+
 app.post('/api/download-ea', async (req, res) => {
   const { email, ea_name } = req.body;
   if (!email || !ea_name) return res.status(400).json({ error: 'Missing email or ea_name' });
   
   try {
-    // 1. Caut user-ul + verific licența activă pentru acest EA
+    // 1. Verific licența activă
     const licCheck = await pool.query(`
       SELECT el.file_name, el.status, u.id AS user_id
       FROM ea_licenses el
@@ -572,31 +586,26 @@ app.post('/api/download-ea', async (req, res) => {
       return res.status(404).json({ error: 'Fișier indisponibil. Contactează suport.' });
     }
     
-    // 2. Creez signed URL temporar (5 minute) via Supabase REST API
-    if (!SUPABASE_SERVICE_KEY) {
-      return res.status(500).json({ error: 'SUPABASE_SERVICE_KEY nu e setat în Render' });
+    if (!supabaseClient) {
+      return res.status(500).json({ error: 'Supabase client neinițializat. SUPABASE_SERVICE_KEY lipsește.' });
     }
     
-    const signedUrlRes = await fetch(`${SUPABASE_URL}/storage/v1/object/sign/ea-files/${encodeURIComponent(fileName)}`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ expiresIn: 300 }) // 5 minute
-    });
+    // 2. Creez signed URL (5 minute) via Supabase JS client
+    const { data, error } = await supabaseClient
+      .storage
+      .from('ea-files')
+      .createSignedUrl(fileName, 300);
     
-    const data = await signedUrlRes.json();
-    if (!data.signedURL) {
-      console.error('Signed URL error:', data);
-      return res.status(500).json({ error: 'Nu am putut genera link de descărcare' });
+    if (error || !data || !data.signedUrl) {
+      console.error('Signed URL error:', error);
+      return res.status(500).json({ error: 'Nu am putut genera link de descărcare: ' + (error?.message || 'unknown') });
     }
     
-    // Log download în access_log_v2
+    // Log download
     await logAccessV2(licCheck.rows[0].user_id, null, ea_name, req.ip, 'DOWNLOAD', true, true);
     
     res.json({ 
-      url: SUPABASE_URL + '/storage/v1' + data.signedURL,
+      url: data.signedUrl,
       file_name: fileName,
       expires_in: 300
     });
