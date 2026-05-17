@@ -1012,6 +1012,12 @@ app.post('/webhook', async (req, res) => {
     const stripeSubId = sub.id;
     
     try {
+      // 🛡️ Validare current_period_end (Stripe poate trimite null la prima creare)
+      if (!sub.current_period_end || isNaN(sub.current_period_end)) {
+        console.log('Subscription updated event: current_period_end invalid, skip');
+        return res.json({ received: true });
+      }
+      
       // Caut user după stripe_customer_id
       let userResult = await pool.query('SELECT id, email FROM users WHERE stripe_customer_id=$1', [stripeCustomerId]);
       if (userResult.rows.length === 0) {
