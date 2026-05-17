@@ -687,8 +687,9 @@ async function saveMyEAs(){
     if(data.success){
       document.getElementById('eaOkEl').style.display = 'block';
       setTimeout(() => document.getElementById('eaOkEl').style.display = 'none', 3000);
-      // Reload portal data
-      await loadUserDataFromSupabase(currentUser);
+      // Reload portal data + forțez render
+      const userData = await loadUserDataFromSupabase(currentUser);
+      if(userData) renderPortal(userData);
     } else {
       document.getElementById('eaErrEl').textContent = data.error || 'Eroare.';
     }
