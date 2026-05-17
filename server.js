@@ -1033,11 +1033,10 @@ app.post('/webhook', async (req, res) => {
     const stripeSubId = sub.id;
     
     try {
-      // 🛡️ Validare current_period_end (Stripe poate trimite null la prima creare)
-      if (!sub.current_period_end || isNaN(sub.current_period_end)) {
-        console.log('Subscription updated event: current_period_end invalid, skip');
-        return res.json({ received: true });
-      }
+      // 🛡️ Caut period_end oriunde e (Stripe variază între versiuni)
+      const rawPeriodEnd = sub.current_period_end 
+                        || sub.items?.data?.[0]?.current_period_end 
+                        || sub.billing_cycle_anchor;
       
       // Caut user după stripe_customer_id
       let userResult = await pool.query('SELECT id, email FROM users WHERE stripe_customer_id=$1', [stripeCustomerId]);
@@ -1047,8 +1046,7 @@ app.post('/webhook', async (req, res) => {
       }
       const user = userResult.rows[0];
       
-      // Determin noul plan din price_id
-      const priceId = sub.items?.data?.[0]?.price?.id;
+      // Determin noul plan din price amount
       const priceAmount = sub.items?.data?.[0]?.price?.unit_amount; // în cenți
       
       let newPlan = 'basic';
@@ -1056,7 +1054,16 @@ app.post('/webhook', async (req, res) => {
       if (priceAmount >= 6500) { newPlan = 'full_access'; maxAccounts = 3; }
       else if (priceAmount >= 4000) { newPlan = 'pro'; maxAccounts = 2; }
       
-      const periodEnd = new Date(sub.current_period_end * 1000);
+      // Calculez period_end, default 30 zile dacă lipsește
+      let periodEnd;
+      if (rawPeriodEnd && !isNaN(rawPeriodEnd)) {
+        periodEnd = new Date(rawPeriodEnd * 1000);
+      } else {
+        periodEnd = new Date();
+        periodEnd.setDate(periodEnd.getDate() + 30);
+        console.log('⚠️ period_end lipsește, folosesc default +30 zile');
+      }
+      
       const newStatus = sub.cancel_at_period_end ? 'cancelling' : 'active';
       
       // Update subscription în DB
