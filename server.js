@@ -1066,11 +1066,19 @@ app.post('/webhook', async (req, res) => {
       
       const newStatus = sub.cancel_at_period_end ? 'cancelling' : 'active';
       
-      // Update subscription în DB
+      // Update subscription în DB (sistem nou)
       await pool.query(
         `UPDATE subscriptions SET plan=$1, max_mt5_accounts=$2, status=$3, current_period_end=$4 
          WHERE user_id=$5`,
         [newPlan, maxAccounts, newStatus, periodEnd.toISOString(), user.id]
+      );
+      
+      // 🆕 Update și tabela licenses (sistem vechi folosit de admin panel)
+      const legacyPlan = newPlan === 'full_access' ? 'full' : newPlan;
+      const legacyExpires = periodEnd.toISOString().split('T')[0];
+      await pool.query(
+        `UPDATE licenses SET plan=$1, expires_at=$2, status='active' WHERE email=$3`,
+        [legacyPlan, legacyExpires, user.email]
       );
       
       // Update EA-uri: doar dacă upgrade la full_access, adaug toate 6
