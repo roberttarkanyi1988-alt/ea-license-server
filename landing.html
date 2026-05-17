@@ -253,7 +253,7 @@ footer a{color:var(--accent);text-decoration:none;}
 <div class="stats-strip">
   <div class="stat-item"><span class="stat-num">6</span><span class="stat-lbl" data-t="s1">Strategii active</span></div>
   <div class="stat-item"><span class="stat-num">24/7</span><span class="stat-lbl" data-t="s2">Rulează non-stop</span></div>
-  <div class="stat-item"><span class="stat-num">7</span><span class="stat-lbl" data-t="s3">Zile trial gratuit</span></div>
+  <div class="stat-item"><span class="stat-num">100%</span><span class="stat-lbl" data-t="s3">Automatizat</span></div>
   <div class="stat-item"><span class="stat-num">instant</span><span class="stat-lbl" data-t="s4">Activare după plată</span></div>
 </div>
 
@@ -277,7 +277,7 @@ footer a{color:var(--accent);text-decoration:none;}
   <div class="section" style="text-align:center">
     <span class="section-tag" data-t="p-tag">Planuri și prețuri</span>
     <h2 class="section-title" data-t="p-title">Simplu și transparent</h2>
-    <p class="section-sub" style="margin:0 auto" data-t="p-sub">7 zile trial gratuit la orice plan. Anulare oricând.</p>
+    <p class="section-sub" style="margin:0 auto" data-t="p-sub">Plată lunară. Anulare oricând din portal.</p>
     <div class="pricing-grid" style="text-align:left">
 
       <div class="plan-card">
@@ -291,9 +291,9 @@ footer a{color:var(--accent);text-decoration:none;}
           <li data-t="f-se">Suport email</li>
           <li data-t="f-dc">Acces server Discord</li>
           <li data-t="f-up">Update-uri incluse</li>
-          <li class="hl" data-t="f-tr">7 zile trial gratuit</li>
+          
         </ul>
-        <button class="plan-btn" onclick="startCheckout('basic')" data-t="btn-tr">Începe trial gratuit</button>
+        <button class="plan-btn" onclick="startCheckout('basic')" data-t="btn-tr">Cumpără acum</button>
       </div>
 
       <div class="plan-card featured">
@@ -308,9 +308,9 @@ footer a{color:var(--accent);text-decoration:none;}
           <li data-t="f-sp">Suport prioritar</li>
           <li data-t="f-dv">Discord VIP acces</li>
           <li data-t="f-up">Update-uri incluse</li>
-          <li class="hl" data-t="f-tr">7 zile trial gratuit</li>
+          
         </ul>
-        <button class="plan-btn pri" onclick="startCheckout('pro')" data-t="btn-tr">Începe trial gratuit</button>
+        <button class="plan-btn pri" onclick="startCheckout('pro')" data-t="btn-tr">Cumpără acum</button>
       </div>
 
       <div class="plan-card">
@@ -324,9 +324,9 @@ footer a{color:var(--accent);text-decoration:none;}
           <li data-t="f-s1x">Suport direct 1:1</li>
           <li data-t="f-dv">Discord VIP acces</li>
           <li data-t="f-ne">Strategie nouă gratis</li>
-          <li class="hl" data-t="f-tr">7 zile trial gratuit</li>
+          
         </ul>
-        <button class="plan-btn" onclick="startCheckout('full')" data-t="btn-tr">Începe trial gratuit</button>
+        <button class="plan-btn" onclick="startCheckout('full')" data-t="btn-tr">Cumpără acum</button>
       </div>
 
     </div>
@@ -376,7 +376,7 @@ footer a{color:var(--accent);text-decoration:none;}
 
 <div class="cta-section">
   <h2 class="section-title" data-t="cta-t">Gata să începi?</h2>
-  <p class="section-sub" style="margin:14px auto 38px" data-t="cta-s">7 zile trial gratuit. Fără risc, fără angajament.</p>
+  <p class="section-sub" style="margin:14px auto 38px" data-t="cta-s">Activare imediat după plată. Reînnoire automată lunară.</p>
   <a href="#pricing" class="btn-primary" data-t="cta-b">Alege planul tău</a>
 </div>
 
@@ -437,7 +437,7 @@ const T={
     'ht1':'Trading automatizat','ht2':'la nivel profesional',
     'hs':'Strategii algoritmice MT5 testate, activare instantă după plată, reînnoire automată. Fără complicații.',
     'hc1':'Vezi planurile','hc2':'Cum funcționează',
-    's1':'Strategii active','s2':'Rulează non-stop','s3':'Zile trial gratuit','s4':'Activare după plată',
+    's1':'Strategii active','s2':'Rulează non-stop','s3':'Automatizat','s4':'Activare după plată',
     'ea-tag':'Strategiile disponibile','ea-title':'6 EA-uri testate și stabile',
     'ea-sub':'Fiecare strategie e optimizată pentru perechea ei specifică și rulează 24/7 pe VPS dedicat.',
     'e1n':'ZigZag Fibo','e1s':'GOLD · H1','e1d':'Strategie Fibonacci cu confirmări ZigZag pe Gold.',
@@ -448,7 +448,7 @@ const T={
     'e6n':'Simple BuyDay','e6s':'INDICES · DAILY','e6d':'Strategie simplă de cumpărare la deschiderea zilei.',
     'ea-act':'Activ',
     'p-tag':'Planuri și prețuri','p-title':'Simplu și transparent',
-    'p-sub':'7 zile trial gratuit la orice plan. Anulare oricând.',
+    'p-sub':'Plată lunară. Anulare oricând din portal.',
     'pm':'/lună','popular':'Cel mai popular',
     'ba':'1 cont MT5','pa':'2 conturi MT5','fa':'3 conturi MT5',
     'bd':'1 EA la alegere · suport Discord ticket','pd':'3 EA-uri la alegere · suport Discord ticket prioritar','fd':'Toate EA-urile · suport Discord ticket 1:1',
@@ -456,9 +456,8 @@ const T={
     'f-a1':'1 cont MT5 atașat','f-a2':'2 conturi MT5 atașate','f-a3':'3 conturi MT5 atașate',
     'f-se':'Suport Discord ticket','f-sp':'Suport Discord ticket prioritar','f-s1x':'Suport Discord ticket 1:1',
     'f-dc':'Acces server Discord','f-dv':'Discord VIP acces',
-    'f-up':'Update-uri incluse','f-ne':'Strategie nouă gratis','f-tr':'7 zile trial gratuit',
-    'btn-tr':'Începe trial gratuit',
-    'tn':'Cardul nu e debitat în primele 7 zile · Anulare oricând din portalul tău',
+    'f-up':'Update-uri incluse','f-ne':'Strategie nouă gratis',
+    'btn-tr':'Cumpără acum',
     'cl':'Ai un cod de reducere?','cb':'Aplică',
     'h-tag':'Proces simplu','h-title':'Cum funcționează','h-sub':'De la plată la EA activ în mai puțin de 5 minute.',
     'st1':'Alegi planul','sd1':'Selectezi planul potrivit și introduci datele cardului. Plata e procesată securizat prin Stripe.',
@@ -472,7 +471,7 @@ const T={
     't1':'"EA Strategy 1 rulează de 3 luni fără nicio problemă. Activarea a fost instantă după plată."',
     't2':'"Am luat Full Access și merită fiecare euro. Suportul e rapid și portalul e ușor de folosit."',
     't3':'"Primul EA pe care l-am rulat mai mult de o lună fără să îl resetez. Recomand cu încredere."',
-    'cta-t':'Gata să începi?','cta-s':'7 zile trial gratuit. Fără risc, fără angajament.','cta-b':'Alege planul tău',
+    'cta-t':'Gata să începi?','cta-s':'Activare imediat după plată. Reînnoire automată lunară.','cta-b':'Alege planul tău',
     'f-chk':'Verifică abonamentul','f-log':'Login portal',
     'lt':'Intră în cont','ls':'Accesează portalul tău de licențe',
     'le':'Email','lp':'Parolă','lb':'Intră în cont','lna':'Nu ai cont?','lr':'Înregistrează-te',
@@ -489,7 +488,7 @@ const T={
     'ht1':'Automated trading','ht2':'at a professional level',
     'hs':'Tested MT5 algorithmic strategies, instant activation after payment, automatic renewal. No complications.',
     'hc1':'View plans','hc2':'How it works',
-    's1':'Active strategies','s2':'Runs non-stop','s3':'Days free trial','s4':'Instant activation',
+    's1':'Active strategies','s2':'Runs non-stop','s3':'Automated','s4':'Instant activation',
     'ea-tag':'Available strategies','ea-title':'6 tested and stable EAs',
     'ea-sub':'Each strategy is optimized for its specific pair and runs 24/7 on a dedicated VPS.',
     'e1n':'ZigZag Fibo','e1s':'GOLD · H1','e1d':'Fibonacci strategy with ZigZag confirmations on Gold.',
@@ -500,7 +499,7 @@ const T={
     'e6n':'Simple BuyDay','e6s':'INDICES · DAILY','e6d':'Simple buy-on-open strategy on indices.',
     'ea-act':'Active',
     'p-tag':'Plans & pricing','p-title':'Simple and transparent',
-    'p-sub':'7-day free trial on any plan. Cancel anytime.',
+    'p-sub':'Monthly payment. Cancel anytime from portal.',
     'pm':'/month','popular':'Most popular',
     'ba':'1 MT5 account','pa':'2 MT5 accounts','fa':'3 MT5 accounts',
     'bd':'1 EA of choice · Discord ticket support','pd':'3 EAs of choice · priority Discord ticket support','fd':'All EAs · 1:1 Discord ticket support',
@@ -508,9 +507,8 @@ const T={
     'f-a1':'1 MT5 account attached','f-a2':'2 MT5 accounts attached','f-a3':'3 MT5 accounts attached',
     'f-se':'Discord ticket support','f-sp':'Priority Discord ticket support','f-s1x':'1:1 Discord ticket support',
     'f-dc':'Discord server access','f-dv':'Discord VIP access',
-    'f-up':'Updates included','f-ne':'New strategy for free','f-tr':'7-day free trial',
-    'btn-tr':'Start free trial',
-    'tn':'Card not charged in the first 7 days · Cancel anytime from your portal',
+    'f-up':'Updates included','f-ne':'New strategy for free',
+    'btn-tr':'Buy now',
     'cl':'Have a discount code?','cb':'Apply',
     'h-tag':'Simple process','h-title':'How it works','h-sub':'From payment to active EA in less than 5 minutes.',
     'st1':'Choose your plan','sd1':'Select the right plan and enter your card details. Payment processed securely via Stripe.',
@@ -524,7 +522,7 @@ const T={
     't1':'"EA Strategy 1 has been running for 3 months without issues. Activation was instant after payment."',
     't2':'"I got Full Access and it is worth every euro. Support is fast and the portal is easy to use."',
     't3':'"The first EA I have run for more than a month without resetting it. Highly recommended."',
-    'cta-t':'Ready to start?','cta-s':'7-day free trial. No risk, no commitment.','cta-b':'Choose your plan',
+    'cta-t':'Ready to start?','cta-s':'Instant activation after payment. Monthly auto-renewal.','cta-b':'Choose your plan',
     'f-chk':'Check subscription','f-log':'Portal login',
     'lt':'Sign in','ls':'Access your license portal',
     'le':'Email','lp':'Password','lb':'Sign in','lna':'No account?','lr':'Register',
@@ -541,7 +539,7 @@ const T={
     'ht1':'Automatisiertes Trading','ht2':'auf professionellem Niveau',
     'hs':'Getestete MT5-Strategien, sofortige Aktivierung nach Zahlung, automatische Verlängerung.',
     'hc1':'Pläne ansehen','hc2':'Wie es funktioniert',
-    's1':'Aktive Strategien','s2':'Läuft rund um die Uhr','s3':'Tage Testversion','s4':'Sofortige Aktivierung',
+    's1':'Aktive Strategien','s2':'Läuft rund um die Uhr','s3':'Automatisiert','s4':'Sofortige Aktivierung',
     'ea-tag':'Verfügbare Strategien','ea-title':'6 getestete und stabile EAs',
     'ea-sub':'Jede Strategie ist für ihr Paar optimiert und läuft 24/7 auf einem dedizierten VPS.',
     'e1n':'ZigZag Fibo','e1s':'GOLD · H1','e1d':'Fibonacci-Strategie mit ZigZag-Bestätigungen auf Gold.',
@@ -552,7 +550,7 @@ const T={
     'e6n':'Simple BuyDay','e6s':'INDICES · DAILY','e6d':'Einfache Kaufstrategie zur Tageseröffnung auf Indizes.',
     'ea-act':'Aktiv',
     'p-tag':'Pläne & Preise','p-title':'Einfach und transparent',
-    'p-sub':'7 Tage kostenlose Testversion. Jederzeit kündbar.',
+    'p-sub':'Monatliche Zahlung. Jederzeit über Portal kündbar.',
     'pm':'/Monat','popular':'Am beliebtesten',
     'ba':'1 MT5-Konto','pa':'2 MT5-Konten','fa':'3 MT5-Konten',
     'bd':'1 EA nach Wahl · Discord-Ticket-Support','pd':'3 EAs nach Wahl · Priorisierter Discord-Ticket-Support','fd':'Alle EAs · 1:1 Discord-Ticket-Support',
@@ -560,9 +558,8 @@ const T={
     'f-a1':'1 MT5-Konto verknüpft','f-a2':'2 MT5-Konten verknüpft','f-a3':'3 MT5-Konten verknüpft',
     'f-se':'Discord-Ticket-Support','f-sp':'Priorisierter Discord-Ticket-Support','f-s1x':'1:1 Discord-Ticket-Support',
     'f-dc':'Discord-Server-Zugang','f-dv':'Discord VIP-Zugang',
-    'f-up':'Updates inklusive','f-ne':'Neue Strategie kostenlos','f-tr':'7 Tage kostenlose Testversion',
-    'btn-tr':'Kostenlose Testversion starten',
-    'tn':'Karte wird in den ersten 7 Tagen nicht belastet · Jederzeit kündbar',
+    'f-up':'Updates inklusive','f-ne':'Neue Strategie kostenlos',
+    'btn-tr':'Jetzt kaufen',
     'cl':'Haben Sie einen Rabattcode?','cb':'Anwenden',
     'h-tag':'Einfacher Prozess','h-title':'Wie es funktioniert','h-sub':'Von der Zahlung zum aktiven EA in weniger als 5 Minuten.',
     'st1':'Plan wählen','sd1':'Wählen Sie den richtigen Plan und geben Sie Ihre Kartendaten ein. Zahlung sicher über Stripe.',
@@ -576,7 +573,7 @@ const T={
     't1':'"EA Strategy 1 läuft seit 3 Monaten ohne Probleme. Die Aktivierung war sofort nach der Zahlung."',
     't2':'"Ich habe Full Access genommen und es ist jeden Euro wert. Support ist schnell."',
     't3':'"Der erste EA, den ich länger als einen Monat ohne Reset laufen lasse. Sehr empfehlenswert."',
-    'cta-t':'Bereit anzufangen?','cta-s':'7 Tage kostenlos. Kein Risiko.','cta-b':'Wählen Sie Ihren Plan',
+    'cta-t':'Bereit anzufangen?','cta-s':'Sofortige Aktivierung nach Zahlung. Monatliche Verlängerung.','cta-b':'Wählen Sie Ihren Plan',
     'f-chk':'Abonnement prüfen','f-log':'Portal-Login',
     'lt':'Anmelden','ls':'Zugriff auf Ihr Lizenz-Portal',
     'le':'E-Mail','lp':'Passwort','lb':'Anmelden','lna':'Kein Konto?','lr':'Registrieren',
