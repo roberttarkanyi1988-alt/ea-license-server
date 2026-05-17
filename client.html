@@ -618,7 +618,7 @@ let eaSelectorData = null;
 async function loadEASelector(){
   if(!currentEmail) return;
   try {
-    const res = await fetch(`${SERVER_URL}/api/my-eas?email=${encodeURIComponent(currentEmail)}`);
+    const res = await fetch(`/api/my-eas?email=${encodeURIComponent(currentEmail)}`);
     const data = await res.json();
     if(data.error) return;
     eaSelectorData = data;
@@ -678,7 +678,7 @@ async function saveMyEAs(){
   btn.textContent = '...';
   
   try {
-    const res = await fetch(`${SERVER_URL}/api/update-my-eas`, {
+    const res = await fetch(`/api/update-my-eas`, {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ email: currentEmail, ea_names: checked })
