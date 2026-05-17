@@ -202,6 +202,21 @@ nav{position:fixed;top:0;left:0;right:0;z-index:200;background:rgba(10,12,15,0.9
     <div class="sec-title" data-t="sec-lic">Licențele mele</div>
     <div id="licEl"></div>
 
+    <!-- 🆕 SESIUNEA 14: Selector EA-uri (vizibil doar Basic/Pro fără EA-uri sau cu mai puține) -->
+    <div id="eaSelectorWrap" style="display:none;margin-top:20px;">
+      <div class="sec-title">🤖 <span data-t="sec-choose-ea">Alege EA-urile tale</span></div>
+      <div class="acct-card">
+        <div class="acct-counter">
+          <span data-t="ea-chosen">EA-uri alese:</span> 
+          <b id="eaChosenCount">0</b> / <b id="eaMaxCount">1</b>
+        </div>
+        <div id="eaCheckList" style="margin-top:12px;"></div>
+        <button id="eaSaveBtn" class="add-btn" style="margin-top:12px;width:100%;" onclick="saveMyEAs()" data-t="ea-save">💾 Salvează alegerea</button>
+        <div class="msg-ok" id="eaOkEl" data-t="ea-saved" style="display:none;">✅ EA-urile au fost actualizate!</div>
+        <div class="msg-err" id="eaErrEl"></div>
+      </div>
+    </div>
+
     <div class="sec-title" data-t="sec-acct">Conturi MT5</div>
     <div class="acct-card">
       <div class="acct-counter"><span data-t="acct-used">Conturi folosite:</span> <b id="acctCountEl">0</b> / <b id="acctMaxEl">2</b></div>
@@ -278,6 +293,8 @@ const T = {
     'expires':'Expiră','autorenewal':'Reînnoire auto','autorenewal-val':'Da ✓',
     'days-left':'zile rămase din','inv-pdf':'PDF',
     'plan-pro':'Pro','plan-basic':'Basic','plan-full':'Full Access',
+    'sec-choose-ea':'Alege EA-urile tale','ea-chosen':'EA-uri alese:','ea-save':'💾 Salvează alegerea',
+    'ea-saved':'✅ EA-urile au fost actualizate!','ea-limit-err':'Ai depășit limita planului tău.','ea-min-err':'Alege cel puțin un EA.',
     'le-empty':'Completează email și parola.','le-inv':'Email sau parolă incorectă.',
     're-empty':'Completează toate câmpurile.','re-ok':'Cont creat! Verifică emailul.',
     'acct-err-empty':'Introdu un număr valid.','acct-err-exists':'Cont deja adăugat.',
@@ -309,6 +326,8 @@ const T = {
     'expires':'Expires','autorenewal':'Auto-renewal','autorenewal-val':'Yes ✓',
     'days-left':'days left of','inv-pdf':'PDF',
     'plan-pro':'Pro','plan-basic':'Basic','plan-full':'Full Access',
+    'sec-choose-ea':'Choose your EAs','ea-chosen':'EAs chosen:','ea-save':'💾 Save selection',
+    'ea-saved':'✅ EAs updated!','ea-limit-err':'You exceeded your plan limit.','ea-min-err':'Choose at least one EA.',
     'le-empty':'Please enter email and password.','le-inv':'Incorrect email or password.',
     're-empty':'Please fill in all fields.','re-ok':'Account created! Check your email.',
     'acct-err-empty':'Enter a valid number.','acct-err-exists':'Account already added.',
@@ -340,6 +359,8 @@ const T = {
     'expires':'Läuft ab','autorenewal':'Auto-Verlängerung','autorenewal-val':'Ja ✓',
     'days-left':'Tage verbleibend von','inv-pdf':'PDF',
     'plan-pro':'Pro','plan-basic':'Basic','plan-full':'Full Access',
+    'sec-choose-ea':'Wählen Sie Ihre EAs','ea-chosen':'EAs gewählt:','ea-save':'💾 Auswahl speichern',
+    'ea-saved':'✅ EAs aktualisiert!','ea-limit-err':'Sie haben Ihr Planlimit überschritten.','ea-min-err':'Wählen Sie mindestens einen EA.',
     'le-empty':'Bitte E-Mail und Passwort eingeben.','le-inv':'Falsche E-Mail oder Passwort.',
     're-empty':'Bitte alle Felder ausfüllen.','re-ok':'Konto erstellt! E-Mail prüfen.',
     'acct-err-empty':'Gültige Nummer eingeben.','acct-err-exists':'Konto bereits hinzugefügt.',
@@ -564,6 +585,8 @@ function renderLicenses(licenses){
   
   if(licenses.length === 0){
     licEl.innerHTML = `<div class="lic-card" style="text-align:center;color:var(--muted);font-size:13px;">${t('no-licenses')}</div>`;
+    // Re-evaluate selector EA (poate clientul are plan dar fără EA-uri alese încă)
+    loadEASelector();
     return;
   }
   
@@ -585,6 +608,96 @@ function renderLicenses(licenses){
         <div class="prog-lbl">${lic.daysLeft} ${t('days-left')} ${lic.daysTotal}</div>
       </div>`;
   });
+  
+  // 🆕 SESIUNEA 14: După render licențe, încărcăm și selectorul de EA-uri
+  loadEASelector();
+}
+
+// 🆕 SESIUNEA 14: Încarcă selectorul de EA-uri (vizibil doar pentru Basic/Pro)
+let eaSelectorData = null;
+async function loadEASelector(){
+  if(!currentEmail) return;
+  try {
+    const res = await fetch(`${SERVER_URL}/api/my-eas?email=${encodeURIComponent(currentEmail)}`);
+    const data = await res.json();
+    if(data.error) return;
+    eaSelectorData = data;
+    
+    const wrap = document.getElementById('eaSelectorWrap');
+    
+    // Ascund selector dacă e Full Access (primește toate automat)
+    if(!data.can_choose){
+      wrap.style.display = 'none';
+      return;
+    }
+    
+    wrap.style.display = 'block';
+    document.getElementById('eaMaxCount').textContent = data.max_eas;
+    document.getElementById('eaChosenCount').textContent = data.active_eas.length;
+    
+    const list = document.getElementById('eaCheckList');
+    list.innerHTML = '';
+    data.all_eas.forEach(eaName => {
+      const isActive = data.active_eas.includes(eaName);
+      list.innerHTML += `
+        <label style="display:flex;align-items:center;padding:10px;background:rgba(255,255,255,0.03);border-radius:8px;margin-bottom:6px;cursor:pointer;">
+          <input type="checkbox" class="ea-check" value="${eaName}" ${isActive?'checked':''} onchange="updateEACount()" style="margin-right:10px;width:18px;height:18px;cursor:pointer;">
+          <span style="color:var(--text);">${eaName}</span>
+        </label>
+      `;
+    });
+  } catch(e) {
+    console.error('loadEASelector error:', e);
+  }
+}
+
+function updateEACount(){
+  const checked = document.querySelectorAll('.ea-check:checked').length;
+  document.getElementById('eaChosenCount').textContent = checked;
+  
+  // Dacă a depășit limita, deselectez ultimul bifat
+  if(eaSelectorData && checked > eaSelectorData.max_eas){
+    const checks = document.querySelectorAll('.ea-check:checked');
+    checks[checks.length-1].checked = false;
+    document.getElementById('eaChosenCount').textContent = eaSelectorData.max_eas;
+    document.getElementById('eaErrEl').textContent = t('ea-limit-err');
+    setTimeout(() => document.getElementById('eaErrEl').textContent = '', 3000);
+  }
+}
+
+async function saveMyEAs(){
+  const checked = Array.from(document.querySelectorAll('.ea-check:checked')).map(c => c.value);
+  if(checked.length === 0){
+    document.getElementById('eaErrEl').textContent = t('ea-min-err');
+    return;
+  }
+  
+  document.getElementById('eaErrEl').textContent = '';
+  const btn = document.getElementById('eaSaveBtn');
+  btn.disabled = true;
+  btn.textContent = '...';
+  
+  try {
+    const res = await fetch(`${SERVER_URL}/api/update-my-eas`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ email: currentEmail, ea_names: checked })
+    });
+    const data = await res.json();
+    if(data.success){
+      document.getElementById('eaOkEl').style.display = 'block';
+      setTimeout(() => document.getElementById('eaOkEl').style.display = 'none', 3000);
+      // Reload portal data
+      await loadUserDataFromSupabase(currentUser);
+    } else {
+      document.getElementById('eaErrEl').textContent = data.error || 'Eroare.';
+    }
+  } catch(e) {
+    document.getElementById('eaErrEl').textContent = t('connection-error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = t('ea-save');
+  }
 }
 
 function renderInvoices(invoices){
