@@ -665,6 +665,58 @@ app.get('/api/my-eas', async (req, res) => {
   }
 });
 
+// 🆕 SESIUNEA 15: Endpoint - lista facturilor clientului (pentru portal RECHNUNGEN)
+app.get('/api/my-invoices', async (req, res) => {
+  const { email } = req.query;
+  if (!email) return res.status(400).json({ error: 'email required' });
+
+  try {
+    const userQuery = await pool.query(
+      `SELECT id FROM users WHERE email = $1 LIMIT 1`,
+      [email]
+    );
+
+    if (userQuery.rows.length === 0) {
+      return res.json({ invoices: [] });
+    }
+
+    const userId = userQuery.rows[0].id;
+
+    const invoicesQuery = await pool.query(`
+      SELECT 
+        i.stripe_invoice_id,
+        i.amount_cents,
+        i.currency,
+        i.status,
+        i.invoice_pdf_url,
+        i.paid_at,
+        i.created_at,
+        s.plan
+      FROM invoices i
+      LEFT JOIN subscriptions s ON s.id = i.subscription_id
+      WHERE i.user_id = $1
+      ORDER BY COALESCE(i.paid_at, i.created_at) DESC
+      LIMIT 50
+    `, [userId]);
+
+    res.json({
+      invoices: invoicesQuery.rows.map(r => ({
+        id: r.stripe_invoice_id,
+        amount: (r.amount_cents / 100).toFixed(2),
+        currency: (r.currency || 'eur').toUpperCase(),
+        status: r.status,
+        pdf_url: r.invoice_pdf_url,
+        paid_at: r.paid_at,
+        created_at: r.created_at,
+        plan: r.plan || 'unknown'
+      }))
+    });
+  } catch (e) {
+    console.error('Eroare listare facturi:', e.message);
+    res.status(500).json({ error: 'server error' });
+  }
+});
+
 // 🆕 SESIUNEA 14: Endpoint - clientul își alege EA-urile
 app.post('/api/update-my-eas', async (req, res) => {
   const { email, ea_names } = req.body;
@@ -1272,6 +1324,78 @@ app.post('/webhook', async (req, res) => {
       console.log(`✅ Subscription cancelled for ${user.email}, grace until ${graceEnd}`);
     } catch (e) {
       console.error('Subscription delete error:', e.message);
+    }
+  }
+
+  if (event.type === 'invoice.paid' || event.type === 'invoice.payment_succeeded') {
+    const inv = event.data.object;
+    const customerEmail = inv.customer_email || (inv.customer_address && inv.customer_address.email);
+
+    try {
+      // Găsim user-ul în Supabase după email sau stripe_customer_id
+      let userQuery = null;
+      if (inv.customer) {
+        userQuery = await pool.query(
+          `SELECT id FROM users WHERE stripe_customer_id = $1 LIMIT 1`,
+          [inv.customer]
+        );
+      }
+      if ((!userQuery || userQuery.rows.length === 0) && customerEmail) {
+        userQuery = await pool.query(
+          `SELECT id FROM users WHERE email = $1 LIMIT 1`,
+          [customerEmail]
+        );
+      }
+
+      if (userQuery && userQuery.rows.length > 0) {
+        const userId = userQuery.rows[0].id;
+
+        // Găsim subscription_id dacă există
+        let subId = null;
+        if (inv.subscription) {
+          const subQuery = await pool.query(
+            `SELECT id FROM subscriptions WHERE stripe_subscription_id = $1 LIMIT 1`,
+            [inv.subscription]
+          );
+          if (subQuery.rows.length > 0) subId = subQuery.rows[0].id;
+        }
+
+        // Salvăm factura în Supabase (upsert pe stripe_invoice_id)
+        await pool.query(`
+          INSERT INTO invoices (
+            user_id, subscription_id, stripe_invoice_id,
+            amount_cents, currency, status, invoice_pdf_url, paid_at
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          ON CONFLICT (stripe_invoice_id) DO UPDATE SET
+            status = excluded.status,
+            invoice_pdf_url = excluded.invoice_pdf_url,
+            paid_at = excluded.paid_at
+        `, [
+          userId,
+          subId,
+          inv.id,
+          inv.amount_paid || inv.amount_due || 0,
+          (inv.currency || 'eur').toLowerCase(),
+          'paid',
+          inv.invoice_pdf || inv.hosted_invoice_url || null,
+          inv.status_transitions?.paid_at
+            ? new Date(inv.status_transitions.paid_at * 1000)
+            : new Date()
+        ]);
+
+        console.log(`✅ Factură salvată: ${inv.id} pentru user_id=${userId}, €${(inv.amount_paid/100).toFixed(2)}`);
+        await sendTelegram(
+          `🧾 <b>Factură nouă salvată</b>\n` +
+          `📧 ${customerEmail || 'N/A'}\n` +
+          `💰 €${((inv.amount_paid || 0)/100).toFixed(2)}\n` +
+          `📄 PDF: disponibil în portal client`
+        );
+      } else {
+        console.warn(`⚠️ Invoice ${inv.id} primit dar user negăsit (email: ${customerEmail})`);
+      }
+    } catch (e) {
+      console.error('Eroare salvare factură:', e.message);
     }
   }
 
