@@ -995,13 +995,127 @@ app.post('/webhook', async (req, res) => {
     );
   }
 
-  if (event.type === 'customer.subscription.deleted' || event.type === 'invoice.payment_failed') {
+  // 🆕 SESIUNEA 13: Gestionare schimbare plan (upgrade/downgrade)
+  if (event.type === 'customer.subscription.updated') {
+    const sub = event.data.object;
+    const stripeCustomerId = sub.customer;
+    const stripeSubId = sub.id;
+    
+    try {
+      // Caut user după stripe_customer_id
+      let userResult = await pool.query('SELECT id, email FROM users WHERE stripe_customer_id=$1', [stripeCustomerId]);
+      if (userResult.rows.length === 0) {
+        console.log(`Webhook update: user neînregistrat pentru ${stripeCustomerId}`);
+        return res.json({ received: true });
+      }
+      const user = userResult.rows[0];
+      
+      // Determin noul plan din price_id
+      const priceId = sub.items?.data?.[0]?.price?.id;
+      const priceAmount = sub.items?.data?.[0]?.price?.unit_amount; // în cenți
+      
+      let newPlan = 'basic';
+      let maxAccounts = 1;
+      if (priceAmount >= 6500) { newPlan = 'full_access'; maxAccounts = 3; }
+      else if (priceAmount >= 4000) { newPlan = 'pro'; maxAccounts = 2; }
+      
+      const periodEnd = new Date(sub.current_period_end * 1000);
+      const newStatus = sub.cancel_at_period_end ? 'cancelling' : 'active';
+      
+      // Update subscription în DB
+      await pool.query(
+        `UPDATE subscriptions SET plan=$1, max_mt5_accounts=$2, status=$3, current_period_end=$4 
+         WHERE user_id=$5`,
+        [newPlan, maxAccounts, newStatus, periodEnd.toISOString(), user.id]
+      );
+      
+      // Update EA-uri: doar dacă upgrade la full_access, adaug toate 6
+      // Pentru downgrade, păstrează cele existente (clientul va folosi mai puține)
+      const EA_MAP = {
+        'ZigZag Fibo EA': 'Fibo_Final_V3.ex5',
+        'Killer Indices EA': 'Killer_Indices_RobertAbo_V3.ex5',
+        'Meneger Stock EA': 'Meneger_Stock_MarketsABO_V3.ex5',
+        'Range Breakout EA': 'Range_Breakout_Abo_V3.ex5',
+        'Robert Long EA': 'Robert_Long_Indices_ABO_V3.ex5',
+        'Simple BuyDay EA': 'Simple__BuyDay_EAABO_V3.ex5'
+      };
+      
+      if (newPlan === 'full_access') {
+        // Adaug toate EA-urile (păstrez ce există + adaug cele lipsă)
+        const subId = (await pool.query('SELECT id FROM subscriptions WHERE user_id=$1', [user.id])).rows[0].id;
+        for (const [eaName, fileName] of Object.entries(EA_MAP)) {
+          const exists = await pool.query('SELECT id FROM ea_licenses WHERE user_id=$1 AND ea_name=$2', [user.id, eaName]);
+          if (exists.rows.length === 0) {
+            await pool.query(
+              `INSERT INTO ea_licenses (user_id, subscription_id, ea_name, file_name, status, activated_at, expires_at)
+               VALUES ($1, $2, $3, $4, 'active', NOW(), $5)`,
+              [user.id, subId, eaName, fileName, periodEnd.toISOString()]
+            );
+          }
+        }
+      }
+      
+      // Update Discord rol
+      await addDiscordRole(user.email, newPlan === 'full_access' ? 'full' : newPlan);
+      
+      const planLabel = sub.cancel_at_period_end ? `${newPlan} (anulare programată)` : newPlan;
+      await sendTelegram(
+        `🔄 <b>ABONAMENT MODIFICAT</b>\n📧 ${user.email}\n📦 Plan nou: <b>${planLabel}</b>\n📅 Activ până: ${periodEnd.toISOString().split('T')[0]}`
+      );
+      
+      console.log(`✅ Subscription updated for ${user.email}: ${newPlan}`);
+    } catch (e) {
+      console.error('Subscription update error:', e.message);
+      await sendTelegram(`⚠️ <b>Eroare update sub:</b>\n${e.message}`);
+    }
+  }
+
+  // 🆕 SESIUNEA 13: Gestionare anulare abonament
+  if (event.type === 'customer.subscription.deleted') {
+    const sub = event.data.object;
+    const stripeCustomerId = sub.customer;
+    
+    try {
+      const userResult = await pool.query('SELECT id, email FROM users WHERE stripe_customer_id=$1', [stripeCustomerId]);
+      if (userResult.rows.length === 0) return res.json({ received: true });
+      const user = userResult.rows[0];
+      
+      // Marchez subscription expirat + intră în grace 30 zile
+      const graceEnd = new Date();
+      graceEnd.setDate(graceEnd.getDate() + 30);
+      
+      await pool.query(
+        `UPDATE subscriptions SET status='grace_period', grace_period_until=$1 WHERE user_id=$2`,
+        [graceEnd.toISOString(), user.id]
+      );
+      
+      // Marchez și EA licenses (rămân active 30 zile prin grace_period)
+      await pool.query(
+        `UPDATE ea_licenses SET expires_at=$1 WHERE user_id=$2 AND status='active'`,
+        [graceEnd.toISOString(), user.id]
+      );
+      
+      // Trimit DM pe Discord cu avertisment grace
+      await removeDiscordRole(user.email, true, 'Abonament anulat — grace 30 zile');
+      
+      // Legacy sistem
+      await pool.query("UPDATE licenses SET status='expired' WHERE email=$1", [user.email]);
+      
+      await sendTelegram(
+        `❌ <b>ABONAMENT ANULAT</b>\n📧 ${user.email}\n⏰ Grace 30 zile activ\n📅 Kick automat: ${graceEnd.toISOString().split('T')[0]}`
+      );
+      
+      console.log(`✅ Subscription cancelled for ${user.email}, grace until ${graceEnd}`);
+    } catch (e) {
+      console.error('Subscription delete error:', e.message);
+    }
+  }
+
+  if (event.type === 'invoice.payment_failed') {
     const obj = event.data.object;
     const email = obj.customer_email || obj.metadata?.email;
     if (email) {
-      await removeDiscordRole(email);
-      await pool.query("UPDATE licenses SET status='expired' WHERE email=$1", [email]);
-      await sendTelegram(`❌ <b>Abonament anulat!</b>\n📧 Email: ${email}`);
+      await sendTelegram(`⚠️ <b>Plată eșuată</b>\n📧 ${email}\n💳 Stripe va încerca din nou automat`);
     }
   }
 
