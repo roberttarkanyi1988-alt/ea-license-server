@@ -110,67 +110,104 @@ async function sendTelegram(message) {
   }
 }
 
-// 🆕 SESIUNEA 15-FIX: Funcție helper pentru salvarea facturii din Stripe
-// Apelată din customer.subscription.updated (eveniment care vine 100%)
-async function saveInvoiceFromStripe(invoiceId, userId, subId, userEmail) {
+// 🆕 SESIUNEA 15-FIX v2 (Opțiunea B): Sincronizare TOATE facturile lipsă pentru un customer
+// Aceasta abordare e ROBUSTĂ — nu pierdem niciodată facturi, indiferent ce eveniment Stripe primim
+async function saveInvoiceFromStripe(invoiceIdOrNull, userId, subId, userEmail, stripeCustomerId = null) {
   try {
-    if (!invoiceId) {
-      console.log('saveInvoice: invoiceId lipsește');
+    // 1. Aflu stripe_customer_id dacă nu mi-a fost dat
+    let customerId = stripeCustomerId;
+    if (!customerId && userId) {
+      const userQuery = await pool.query(
+        'SELECT stripe_customer_id FROM users WHERE id = $1 LIMIT 1',
+        [userId]
+      );
+      customerId = userQuery.rows[0]?.stripe_customer_id;
+    }
+
+    if (!customerId) {
+      console.log('saveInvoice: nu am stripe_customer_id, sar peste');
       return false;
     }
 
-    // Cer factura completă de la Stripe
-    const inv = await stripe.invoices.retrieve(invoiceId);
-    if (!inv) {
-      console.log(`saveInvoice: factura ${invoiceId} negăsită în Stripe`);
+    // 2. Cer Stripe TOATE facturile recente ale customer-ului (PLĂTITE)
+    const stripeInvoices = await stripe.invoices.list({
+      customer: customerId,
+      status: 'paid',
+      limit: 20  // ultimele 20 facturi plătite — suficient
+    });
+
+    if (!stripeInvoices.data || stripeInvoices.data.length === 0) {
+      console.log(`saveInvoice: niciun invoice plătit pentru customer ${customerId}`);
       return false;
     }
 
-    // Verific dacă factura există deja în DB (evităm duplicate)
-    const existing = await pool.query(
-      'SELECT id FROM invoices WHERE stripe_invoice_id = $1 LIMIT 1',
-      [inv.id]
+    // 3. Verific care din ele NU sunt deja în Supabase
+    const stripeInvoiceIds = stripeInvoices.data.map(inv => inv.id);
+    const existingQuery = await pool.query(
+      'SELECT stripe_invoice_id FROM invoices WHERE stripe_invoice_id = ANY($1::text[])',
+      [stripeInvoiceIds]
     );
+    const existingIds = new Set(existingQuery.rows.map(r => r.stripe_invoice_id));
 
-    const amount = inv.amount_paid || inv.amount_due || 0;
-    const pdfUrl = inv.invoice_pdf || inv.hosted_invoice_url || null;
-    const status = inv.status || 'paid';
-    const paidAt = inv.status_transitions?.paid_at
-      ? new Date(inv.status_transitions.paid_at * 1000)
-      : new Date();
+    // 4. Salvez DOAR facturile noi (cele care nu există deja)
+    let savedCount = 0;
+    for (const inv of stripeInvoices.data) {
+      if (existingIds.has(inv.id)) continue;  // Sărim peste cele deja salvate
 
-    await pool.query(`
-      INSERT INTO invoices (
-        user_id, subscription_id, stripe_invoice_id,
-        amount_cents, currency, status, invoice_pdf_url, paid_at
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      ON CONFLICT (stripe_invoice_id) DO UPDATE SET
-        status = excluded.status,
-        invoice_pdf_url = excluded.invoice_pdf_url,
-        paid_at = excluded.paid_at
-    `, [
-      userId,
-      subId,
-      inv.id,
-      amount,
-      (inv.currency || 'eur').toLowerCase(),
-      status,
-      pdfUrl,
-      paidAt
-    ]);
+      const amount = inv.amount_paid || inv.amount_due || 0;
+      if (amount <= 0) continue;  // Sărim peste facturi cu sumă zero (proration credits)
 
-    // Trimit notificare DOAR dacă factura e nouă (nu update)
-    if (existing.rows.length === 0 && amount > 0) {
-      console.log(`✅ Factură salvată: ${inv.id} pentru ${userEmail}, €${(amount/100).toFixed(2)}`);
+      const pdfUrl = inv.invoice_pdf || inv.hosted_invoice_url || null;
+      const status = inv.status || 'paid';
+      const paidAt = inv.status_transitions?.paid_at
+        ? new Date(inv.status_transitions.paid_at * 1000)
+        : new Date();
+
+      // Pentru fiecare factură, încerc să găsesc subscription_id corect (poate fi diferit)
+      let invSubId = subId;
+      if (inv.subscription) {
+        const subQ = await pool.query(
+          'SELECT id FROM subscriptions WHERE stripe_subscription_id = $1 LIMIT 1',
+          [inv.subscription]
+        );
+        if (subQ.rows.length > 0) invSubId = subQ.rows[0].id;
+      }
+
+      await pool.query(`
+        INSERT INTO invoices (
+          user_id, subscription_id, stripe_invoice_id,
+          amount_cents, currency, status, invoice_pdf_url, paid_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        ON CONFLICT (stripe_invoice_id) DO NOTHING
+      `, [
+        userId,
+        invSubId,
+        inv.id,
+        amount,
+        (inv.currency || 'eur').toLowerCase(),
+        status,
+        pdfUrl,
+        paidAt
+      ]);
+
+      savedCount++;
+      console.log(`✅ Factură nouă salvată: ${inv.id} pentru ${userEmail}, €${(amount/100).toFixed(2)}`);
+
+      // Telegram per factură nouă
       await sendTelegram(
         `🧾 <b>Factură nouă salvată</b>\n` +
         `📧 ${userEmail || 'N/A'}\n` +
         `💰 €${(amount/100).toFixed(2)}\n` +
+        `📅 ${paidAt.toISOString().split('T')[0]}\n` +
         `📄 PDF: disponibil în portal client`
       );
-    } else if (existing.rows.length > 0) {
-      console.log(`ℹ️ Factură ${inv.id} actualizată (existentă)`);
+    }
+
+    if (savedCount === 0) {
+      console.log(`ℹ️ Sync facturi pentru ${userEmail}: toate sunt deja salvate (${stripeInvoices.data.length} total)`);
+    } else {
+      console.log(`✅ Sync facturi pentru ${userEmail}: ${savedCount} facturi noi salvate`);
     }
 
     return true;
@@ -1231,10 +1268,8 @@ app.post('/webhook', async (req, res) => {
         
         console.log(`✅ Webhook: user ${email} (id=${userId}) actualizat la ${planForSub}, ${eaList.length} EA-uri`);
 
-        // 🆕 SESIUNEA 15-FIX: Salvez factura din checkout (dacă există)
-        if (session.invoice) {
-          await saveInvoiceFromStripe(session.invoice, userId, subId, email);
-        }
+        // 🆕 SESIUNEA 15-FIX v2: Sincronizez TOATE facturile lipsă ale acestui customer
+        await saveInvoiceFromStripe(session.invoice || null, userId, subId, email, session.customer || null);
       } catch (e) {
         console.error('Webhook NEW system error:', e.message);
         await sendTelegram(`⚠️ <b>Eroare sistem nou:</b>\n${e.message}\n📧 ${email}`);
@@ -1359,11 +1394,10 @@ app.post('/webhook', async (req, res) => {
       
       console.log(`✅ Subscription updated for ${user.email}: ${newPlan}`);
 
-      // 🆕 SESIUNEA 15-FIX: Salvez factura din latest_invoice
-      // Aceasta e SOLUȚIA pentru problema cu invoice.paid care nu vine!
-      // customer.subscription.updated vine 100% și conține latest_invoice
-      if (sub.latest_invoice && subIdForUser) {
-        await saveInvoiceFromStripe(sub.latest_invoice, user.id, subIdForUser, user.email);
+      // 🆕 SESIUNEA 15-FIX v2: Sincronizez TOATE facturile lipsă ale acestui customer
+      // Aceasta abordare e robustă: cere lista completă de la Stripe, salvează doar cele NOI
+      if (subIdForUser) {
+        await saveInvoiceFromStripe(sub.latest_invoice || null, user.id, subIdForUser, user.email, stripeCustomerId);
       }
     } catch (e) {
       console.error('Subscription update error:', e.message);
@@ -1448,8 +1482,8 @@ app.post('/webhook', async (req, res) => {
           if (subQuery.rows.length > 0) subId = subQuery.rows[0].id;
         }
 
-        // Folosim funcția unificată (face și deduplicate)
-        await saveInvoiceFromStripe(inv.id, userId, subId, userEmail);
+        // Folosim funcția unificată (sync TOATE facturile lipsă)
+        await saveInvoiceFromStripe(inv.id, userId, subId, userEmail, inv.customer || null);
       } else {
         console.warn(`⚠️ Invoice ${inv.id} primit dar user negăsit (email: ${customerEmail})`);
       }
