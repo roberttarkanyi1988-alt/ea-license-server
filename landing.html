@@ -631,14 +631,69 @@ function applyCoupon(){
 }
 
 async function startCheckout(plan){
-  const t=T[lang];const mt5=prompt(t['mp']);
-  if(!mt5||mt5.trim().length<5)return;
+  const t=T[lang];
+  
+  // 1. Email
+  const emailPrompt = lang==='ro' ? 'Email-ul tău (pentru cont și suport):' 
+                    : lang==='en' ? 'Your email (for account and support):' 
+                    : 'Ihre E-Mail (für Konto und Support):';
+  const email = prompt(emailPrompt);
+  if(!email || !email.includes('@')) {
+    alert(lang==='ro'?'Email invalid':lang==='en'?'Invalid email':'Ungültige E-Mail');
+    return;
+  }
+  
+  // 2. Cont MT5
+  const mt5 = prompt(t['mp']);
+  if(!mt5 || mt5.trim().length < 5) return;
+  
+  // 3. EA-uri alese (doar pentru basic și pro; full primește toate automat)
+  let easChoice = '';
+  if(plan === 'basic' || plan === 'pro'){
+    const maxEAs = plan === 'pro' ? 3 : 1;
+    const allEAs = [
+      'ZigZag Fibo EA',
+      'Killer Indices EA',
+      'Meneger Stock EA',
+      'Range Breakout EA',
+      'Robert Long EA',
+      'Simple BuyDay EA'
+    ];
+    const listMsg = (lang==='ro' ? `Alege ${maxEAs} EA-uri din lista de mai jos (separate prin virgulă, ex: 1,3,5):` :
+                     lang==='en' ? `Choose ${maxEAs} EA(s) from the list (comma-separated, e.g. 1,3,5):` :
+                     `Wählen Sie ${maxEAs} EA(s) (kommagetrennt, z.B. 1,3,5):`) + '\n\n' + 
+                    allEAs.map((e,i)=>`${i+1}. ${e}`).join('\n');
+    const choice = prompt(listMsg);
+    if(!choice) return;
+    
+    const indices = choice.split(',').map(s => parseInt(s.trim()) - 1).filter(i => i >= 0 && i < allEAs.length);
+    if(indices.length === 0 || indices.length > maxEAs){
+      alert(lang==='ro'?`Trebuie să alegi între 1 și ${maxEAs} EA-uri`:
+            lang==='en'?`You must choose between 1 and ${maxEAs} EA(s)`:
+            `Sie müssen zwischen 1 und ${maxEAs} EA(s) wählen`);
+      return;
+    }
+    easChoice = indices.map(i => allEAs[i]).join(',');
+  }
+  
   try{
-    const res=await fetch(SERVER+'/api/create-payment',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_id:mt5.trim(),months:1,plan:plan})});
-    const data=await res.json();
-    if(data.url)window.location.href=data.url;
-    else alert('Eroare: '+JSON.stringify(data));
-  }catch(e){alert('Eroare conexiune. Încearcă din nou.');}
+    const res = await fetch(SERVER+'/api/create-payment', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        account_id: mt5.trim(),
+        months: 1,
+        plan: plan,
+        email: email.trim().toLowerCase(),
+        eas: easChoice
+      })
+    });
+    const data = await res.json();
+    if(data.url) window.location.href = data.url;
+    else alert('Eroare: ' + JSON.stringify(data));
+  }catch(e){
+    alert('Eroare conexiune. Încearcă din nou.');
+  }
 }
 
 async function loginGoogle(){
