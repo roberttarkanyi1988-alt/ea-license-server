@@ -127,6 +127,15 @@ nav{position:fixed;top:0;left:0;right:0;z-index:200;background:rgba(10,12,15,0.9
 .inv-btn{padding:5px 12px;border-radius:6px;border:1px solid var(--border);font-size:11px;cursor:pointer;font-family:var(--sans);background:transparent;color:var(--muted);transition:all .2s;}
 .inv-btn:hover{border-color:var(--accent);color:var(--accent);}
 
+/* INVOICE INFO BOX */
+.inv-info-box{background:rgba(0,102,255,.05);border:1px solid rgba(0,102,255,.25);border-left:3px solid var(--accent2);border-radius:8px;padding:16px 20px;margin-bottom:16px;}
+.inv-info-title{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
+.inv-info-icon{color:#4f9eff;font-size:14px;}
+.inv-info-label{color:#4f9eff;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;}
+.inv-info-list{list-style:none;padding:0;margin:0;}
+.inv-info-list li{color:#9ca3af;font-size:13px;line-height:1.7;padding:2px 0;display:flex;align-items:flex-start;gap:8px;}
+.inv-info-list li::before{content:'✓';color:var(--accent);font-weight:700;flex-shrink:0;}
+
 @media(max-width:600px){nav{padding:0 16px;}.main{padding:72px 16px 40px;}.lic-rows{grid-template-columns:1fr;}.discord-btn{margin-left:0;}}
 </style>
 </head>
@@ -202,21 +211,6 @@ nav{position:fixed;top:0;left:0;right:0;z-index:200;background:rgba(10,12,15,0.9
     <div class="sec-title" data-t="sec-lic">Licențele mele</div>
     <div id="licEl"></div>
 
-    <!-- 🆕 SESIUNEA 14: Selector EA-uri (vizibil doar Basic/Pro fără EA-uri sau cu mai puține) -->
-    <div id="eaSelectorWrap" style="display:none;margin-top:20px;">
-      <div class="sec-title">🤖 <span data-t="sec-choose-ea">Alege EA-urile tale</span></div>
-      <div class="acct-card">
-        <div class="acct-counter">
-          <span data-t="ea-chosen">EA-uri alese:</span> 
-          <b id="eaChosenCount">0</b> / <b id="eaMaxCount">1</b>
-        </div>
-        <div id="eaCheckList" style="margin-top:12px;"></div>
-        <button id="eaSaveBtn" class="add-btn" style="margin-top:12px;width:100%;" onclick="saveMyEAs()" data-t="ea-save">💾 Salvează alegerea</button>
-        <div class="msg-ok" id="eaOkEl" data-t="ea-saved" style="display:none;">✅ EA-urile au fost actualizate!</div>
-        <div class="msg-err" id="eaErrEl"></div>
-      </div>
-    </div>
-
     <div class="sec-title" data-t="sec-acct">Conturi MT5</div>
     <div class="acct-card">
       <div class="acct-counter"><span data-t="acct-used">Conturi folosite:</span> <b id="acctCountEl">0</b> / <b id="acctMaxEl">2</b></div>
@@ -233,20 +227,35 @@ nav{position:fixed;top:0;left:0;right:0;z-index:200;background:rgba(10,12,15,0.9
     <div class="discord-card">
       <div class="discord-icon">💬</div>
       <div>
-        <div class="discord-title" data-t="disc-title">Conectează Discord</div>
-        <div class="discord-desc" data-t="disc-desc">Conectează contul Discord pentru rol automat și acces VIP.</div>
+        <div class="discord-title" data-t="disc-title">Intră pe serverul Discord</div>
+        <div class="discord-desc" data-t="disc-desc">Canale VIP, ghid VPS, suport direct și update-uri strategii.</div>
       </div>
-      <a href="#" onclick="connectDiscord(event)" class="discord-btn" data-t="disc-btn">Conectează</a>
+      <a href="https://discord.gg/your-server" class="discord-btn" target="_blank" data-t="disc-btn">Intră pe Discord</a>
     </div>
 
     <div class="sec-title" data-t="sec-actions">Acțiuni rapide</div>
     <div class="actions-row">
-      <div class="action-card" onclick="downloadEA()"><div class="action-icon">⬇️</div><div class="action-title" data-t="act1">Descarcă EA</div><div class="action-desc" data-t="act1d">Fișier .ex5 pentru MT5</div></div>
-      <div class="action-card" onclick="openCustomerPortal()"><div class="action-icon">💳</div><div class="action-title" data-t="act2">Metode plată</div><div class="action-desc" data-t="act2d">Actualizează cardul</div></div>
-      <div class="action-card" onclick="openCustomerPortal()"><div class="action-icon">📦</div><div class="action-title" data-t="act3">Schimbă planul</div><div class="action-desc" data-t="act3d">Upgrade sau downgrade</div></div>
+      <div class="action-card" onclick="alert('Coming soon!')"><div class="action-icon">⬇️</div><div class="action-title" data-t="act1">Descarcă EA</div><div class="action-desc" data-t="act1d">Fișier .ex5 pentru MT5</div></div>
+      <div class="action-card" onclick="alert('Coming soon!')"><div class="action-icon">💳</div><div class="action-title" data-t="act2">Metode plată</div><div class="action-desc" data-t="act2d">Actualizează cardul</div></div>
+      <div class="action-card" onclick="alert('Coming soon!')"><div class="action-icon">📦</div><div class="action-title" data-t="act3">Schimbă planul</div><div class="action-desc" data-t="act3d">Upgrade sau downgrade</div></div>
     </div>
 
     <div class="sec-title" data-t="sec-inv">Facturi</div>
+
+    <!-- 🆕 INVOICE INFO BOX -->
+    <div class="inv-info-box">
+      <div class="inv-info-title">
+        <span class="inv-info-icon">ℹ</span>
+        <span class="inv-info-label" data-t="inv-info-title">Info Facturi</span>
+      </div>
+      <ul class="inv-info-list">
+        <li data-t="inv-info-1">Prima plată: factura se creează imediat</li>
+        <li data-t="inv-info-2">Reînnoire lunară: factură nouă la fiecare 30 zile</li>
+        <li data-t="inv-info-3">Schimbare plan: ajustare în următorul ciclu de facturare</li>
+        <li data-t="inv-info-4">Toate facturile sunt descărcabile ca PDF oficial</li>
+      </ul>
+    </div>
+
     <div class="inv-card" id="invEl"></div>
 
   </div>
@@ -258,21 +267,22 @@ const SUPA_URL  = 'https://cxtbthwoffyeazlxzequ.supabase.co';
 const SUPA_KEY  = 'sb_publishable_mFCIzSx4s7dGbQKRhJchLQ_fv9bSu38';
 const sb = window.supabase.createClient(SUPA_URL, SUPA_KEY);
 
-// ── FALLBACK DATA (când userul e nou și n-are încă date în DB) ────────────────
-const FALLBACK = {
-  plan: 'basic',
-  memberSince: '—',
-  accounts: [],
-  maxAccounts: 1,
-  licenses: [],
-  invoices: []
+// ── DEMO DATA ─────────────────────────────────────────────────────────────────
+const DEMO = {
+  plan: 'pro',
+  memberSince: 'Martie 2026',
+  accounts: ['12345678', '87654321'],
+  maxAccounts: 2,
+  licenses: [
+    { ea:'EA Strategy 1', symbol:'XAUUSD · M5', expires:'2026-06-09', daysLeft:21, daysTotal:30, active:true },
+    { ea:'EA Strategy 3', symbol:'GBPUSD · H4', expires:'2026-06-09', daysLeft:21, daysTotal:30, active:true }
+  ],
+  invoices: [
+    { date:'Mai 2026', plan:'Plan Pro', amount:'€45.00' },
+    { date:'Apr 2026', plan:'Plan Pro', amount:'€45.00' },
+    { date:'Mar 2026', plan:'Plan Pro', amount:'€45.00' }
+  ]
 };
-
-// ── STATE GLOBAL ──────────────────────────────────────────────────────────────
-let currentUser = null;        // user din Supabase auth
-let currentUserId = null;      // id-ul din tabela `users`
-let currentEmail = null;
-let currentUserData = {};      // datele afișate în portal
 
 // ── TRANSLATIONS ──────────────────────────────────────────────────────────────
 const T = {
@@ -293,21 +303,15 @@ const T = {
     'expires':'Expiră','autorenewal':'Reînnoire auto','autorenewal-val':'Da ✓',
     'days-left':'zile rămase din','inv-pdf':'PDF',
     'plan-pro':'Pro','plan-basic':'Basic','plan-full':'Full Access',
-    'sec-choose-ea':'Alege EA-urile tale','ea-chosen':'EA-uri alese:','ea-save':'💾 Salvează alegerea',
-    'ea-saved':'✅ EA-urile au fost actualizate!','ea-limit-err':'Ai depășit limita planului tău.','ea-min-err':'Alege cel puțin un EA.',
     'le-empty':'Completează email și parola.','le-inv':'Email sau parolă incorectă.',
     're-empty':'Completează toate câmpurile.','re-ok':'Cont creat! Verifică emailul.',
     'acct-err-empty':'Introdu un număr valid.','acct-err-exists':'Cont deja adăugat.',
-    'acct-err-save':'Eroare la salvare. Încearcă din nou.',
     'confirm-rm':'Elimini contul ','placeholder-acct':'Număr cont MT5...',
-    'no-licenses':'Nu ai licențe active. Cumpără un abonament pentru a începe.',
-    'no-invoices':'Nu ai facturi încă.',
-    'must-login':'Trebuie să fii logat.',
-    'no-subscription':'Nu am găsit abonament. Cumpără un plan mai întâi.',
-    'connection-error':'Eroare conexiune. Încearcă din nou.',
-    'no-eas':'Nu ai EA-uri active. Cumpără un plan mai întâi.',
-    'active-eas':'EA-urile tale active:',
-    'download-info':'⬇ Pentru descărcare: mergi pe canalul #downloads de pe Discord sau deschide un ticket de suport.'
+    'inv-info-title':'Info Facturi',
+    'inv-info-1':'Prima plată: factura se creează imediat',
+    'inv-info-2':'Reînnoire lunară: factură nouă la fiecare 30 zile',
+    'inv-info-3':'Schimbare plan: ajustare în următorul ciclu de facturare',
+    'inv-info-4':'Toate facturile sunt descărcabile ca PDF oficial'
   },
   en:{
     'logout':'Sign out','loading':'Loading...',
@@ -326,21 +330,15 @@ const T = {
     'expires':'Expires','autorenewal':'Auto-renewal','autorenewal-val':'Yes ✓',
     'days-left':'days left of','inv-pdf':'PDF',
     'plan-pro':'Pro','plan-basic':'Basic','plan-full':'Full Access',
-    'sec-choose-ea':'Choose your EAs','ea-chosen':'EAs chosen:','ea-save':'💾 Save selection',
-    'ea-saved':'✅ EAs updated!','ea-limit-err':'You exceeded your plan limit.','ea-min-err':'Choose at least one EA.',
     'le-empty':'Please enter email and password.','le-inv':'Incorrect email or password.',
     're-empty':'Please fill in all fields.','re-ok':'Account created! Check your email.',
     'acct-err-empty':'Enter a valid number.','acct-err-exists':'Account already added.',
-    'acct-err-save':'Save error. Try again.',
     'confirm-rm':'Remove account ','placeholder-acct':'MT5 account number...',
-    'no-licenses':'No active licenses. Purchase a subscription to start.',
-    'no-invoices':'No invoices yet.',
-    'must-login':'You must be logged in.',
-    'no-subscription':'No subscription found. Purchase a plan first.',
-    'connection-error':'Connection error. Try again.',
-    'no-eas':'No active EAs. Purchase a plan first.',
-    'active-eas':'Your active EAs:',
-    'download-info':'⬇ To download: go to the #downloads channel on Discord or open a support ticket.'
+    'inv-info-title':'Invoice Info',
+    'inv-info-1':'First payment: invoice created immediately',
+    'inv-info-2':'Monthly renewal: new invoice every 30 days',
+    'inv-info-3':'Plan change: adjustment in next billing cycle',
+    'inv-info-4':'All invoices downloadable as official PDF'
   },
   de:{
     'logout':'Abmelden','loading':'Wird geladen...',
@@ -359,27 +357,21 @@ const T = {
     'expires':'Läuft ab','autorenewal':'Auto-Verlängerung','autorenewal-val':'Ja ✓',
     'days-left':'Tage verbleibend von','inv-pdf':'PDF',
     'plan-pro':'Pro','plan-basic':'Basic','plan-full':'Full Access',
-    'sec-choose-ea':'Wählen Sie Ihre EAs','ea-chosen':'EAs gewählt:','ea-save':'💾 Auswahl speichern',
-    'ea-saved':'✅ EAs aktualisiert!','ea-limit-err':'Sie haben Ihr Planlimit überschritten.','ea-min-err':'Wählen Sie mindestens einen EA.',
     'le-empty':'Bitte E-Mail und Passwort eingeben.','le-inv':'Falsche E-Mail oder Passwort.',
     're-empty':'Bitte alle Felder ausfüllen.','re-ok':'Konto erstellt! E-Mail prüfen.',
     'acct-err-empty':'Gültige Nummer eingeben.','acct-err-exists':'Konto bereits hinzugefügt.',
-    'acct-err-save':'Speicherfehler. Versuchen Sie es erneut.',
     'confirm-rm':'Konto entfernen ','placeholder-acct':'MT5-Kontonummer...',
-    'no-licenses':'Keine aktiven Lizenzen. Abonnement kaufen.',
-    'no-invoices':'Noch keine Rechnungen.',
-    'must-login':'Sie müssen angemeldet sein.',
-    'no-subscription':'Kein Abonnement gefunden. Kaufen Sie zuerst einen Plan.',
-    'connection-error':'Verbindungsfehler. Versuchen Sie es erneut.',
-    'no-eas':'Keine aktiven EAs. Kaufen Sie zuerst einen Plan.',
-    'active-eas':'Ihre aktiven EAs:',
-    'download-info':'⬇ Zum Herunterladen: gehen Sie zum #downloads-Kanal auf Discord oder eröffnen Sie ein Support-Ticket.'
+    'inv-info-title':'Info Rechnungen',
+    'inv-info-1':'Erste Zahlung: Rechnung wird sofort erstellt',
+    'inv-info-2':'Monatliche Verlängerung: neue Rechnung alle 30 Tage',
+    'inv-info-3':'Planwechsel: Anpassung im nächsten Abrechnungszyklus',
+    'inv-info-4':'Alle Rechnungen als offizielles PDF herunterladbar'
   }
 };
 
 let lang = 'ro';
 let accts = [];
-let maxAccts = 1;
+let maxAccts = 2;
 
 function t(k){ return T[lang][k] || k; }
 
@@ -394,12 +386,6 @@ function applyLang(l){
 function setLang(l,el){
   document.querySelectorAll('.lang-btn').forEach(b=>b.classList.remove('active'));
   el.classList.add('active'); applyLang(l);
-  // Re-render dacă suntem deja în portal (pentru a actualiza textele dinamice)
-  if(currentUserData && currentUserData.name){
-    renderLicenses(currentUserData.licenses || []);
-    renderAccts();
-    renderInvoices(currentUserData.invoices || []);
-  }
 }
 
 // ── VIEWS ─────────────────────────────────────────────────────────────────────
@@ -413,145 +399,8 @@ function showForm(f){
   document.getElementById('formRegister').style.display = f==='register' ? 'block':'none';
 }
 
-// ── 🆕 LOAD USER DATA FROM SUPABASE ───────────────────────────────────────────
-async function loadUserDataFromSupabase(authUser){
-  currentUser = authUser;
-  currentEmail = authUser.email;
-  
-  // 1. Caut sau creez user în tabela `users`
-  let { data: userRow, error: userErr } = await sb
-    .from('users')
-    .select('id, email, full_name, created_at, stripe_customer_id, discord_user_id')
-    .eq('email', authUser.email)
-    .maybeSingle();
-  
-  if(!userRow){
-    // User nou — creează intrare
-    const { data: newUser, error: createErr } = await sb
-      .from('users')
-      .insert({
-        email: authUser.email,
-        full_name: authUser.user_metadata?.full_name || authUser.email.split('@')[0],
-        google_id: authUser.id
-      })
-      .select()
-      .single();
-    
-    if(createErr){
-      console.error('Eroare creare user:', createErr);
-      // Fallback la datele de bază din auth
-      return {
-        name: authUser.user_metadata?.full_name || authUser.email,
-        email: authUser.email,
-        ...FALLBACK
-      };
-    }
-    userRow = newUser;
-  }
-  
-  currentUserId = userRow.id;
-  
-  // 2. Caut subscription activă (cea mai recentă cu status active sau grace_period)
-  const { data: subRow } = await sb
-    .from('subscriptions')
-    .select('id, plan, max_mt5_accounts, status, current_period_start, current_period_end, grace_period_until')
-    .eq('user_id', userRow.id)
-    .in('status', ['active', 'grace_period'])
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  
-  // 3. Caut conturi MT5 active
-  const { data: mtRows } = await sb
-    .from('mt5_accounts')
-    .select('account_number, broker')
-    .eq('user_id', userRow.id)
-    .eq('is_active', true)
-    .order('added_at', { ascending: true });
-  
-  // 4. Caut licențe EA active
-  const { data: licRows } = await sb
-    .from('ea_licenses')
-    .select('ea_name, status, activated_at, expires_at')
-    .eq('user_id', userRow.id)
-    .order('activated_at', { ascending: true });
-  
-  // 5. Caut facturi
-  const { data: invRows } = await sb
-    .from('invoices')
-    .select('id, amount_cents, currency, status, paid_at, invoice_pdf_url, created_at, subscription_id')
-    .eq('user_id', userRow.id)
-    .order('created_at', { ascending: false })
-    .limit(12);
-  
-  // Construire data pentru render
-  const data = {
-    name: userRow.full_name || authUser.email.split('@')[0],
-    email: authUser.email,
-    memberSince: userRow.created_at ? formatMonthYear(userRow.created_at) : '—',
-    plan: subRow ? subRow.plan : 'basic',
-    maxAccounts: subRow ? subRow.max_mt5_accounts : 1,
-    accounts: (mtRows || []).map(m => m.account_number),
-    licenses: (licRows || []).map(l => buildLicenseView(l, subRow)),
-    invoices: (invRows || []).map(i => ({
-      date: formatMonthYear(i.paid_at || i.created_at),
-      plan: subRow ? ('Plan ' + capitalize(subRow.plan)) : 'Abonament',
-      amount: formatMoney(i.amount_cents, i.currency)
-    }))
-  };
-  
-  return data;
-}
-
-function buildLicenseView(licRow, subRow){
-  const now = new Date();
-  const expires = licRow.expires_at ? new Date(licRow.expires_at) : null;
-  const activated = licRow.activated_at ? new Date(licRow.activated_at) : null;
-  
-  const daysLeft = expires ? Math.max(0, Math.ceil((expires - now) / 86400000)) : 30;
-  let daysTotal = 30;
-  if(activated && expires){
-    daysTotal = Math.max(1, Math.ceil((expires - activated) / 86400000));
-  }
-  
-  return {
-    ea: licRow.ea_name,
-    symbol: '', // poate fi extins ulterior
-    expires: expires ? expires.toISOString().split('T')[0] : '—',
-    daysLeft: daysLeft,
-    daysTotal: daysTotal,
-    active: licRow.status === 'active' && daysLeft > 0
-  };
-}
-
-function formatMonthYear(dateStr){
-  if(!dateStr) return '—';
-  try{
-    const d = new Date(dateStr);
-    const months = {
-      ro:['Ianuarie','Februarie','Martie','Aprilie','Mai','Iunie','Iulie','August','Septembrie','Octombrie','Noiembrie','Decembrie'],
-      en:['January','February','March','April','May','June','July','August','September','October','November','December'],
-      de:['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember']
-    };
-    return months[lang][d.getMonth()] + ' ' + d.getFullYear();
-  }catch(e){ return dateStr; }
-}
-
-function formatMoney(cents, currency){
-  const amount = (cents / 100).toFixed(2);
-  const symbol = (currency || 'eur').toLowerCase() === 'eur' ? '€' : '$';
-  return symbol + amount;
-}
-
-function capitalize(s){
-  if(!s) return '';
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
 // ── RENDER PORTAL ─────────────────────────────────────────────────────────────
 function renderPortal(userData){
-  currentUserData = userData;
-  
   // Avatar & name
   const name = userData.name || 'Client';
   const initials = name.split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase();
@@ -559,48 +408,25 @@ function renderPortal(userData){
   document.getElementById('nameEl').textContent = name;
 
   // Plan badge
-  const plan = userData.plan || 'basic';
+  const plan = userData.plan || 'pro';
   const badge = document.getElementById('badgeEl');
   badge.textContent = t('plan-'+plan);
   badge.className = 'plan-badge plan-'+plan;
 
   // Member since
-  document.getElementById('sinceEl').textContent = userData.memberSince || '—';
+  if(userData.memberSince) document.getElementById('sinceEl').textContent = userData.memberSince;
 
-  // Licenses, Accounts, Invoices
-  renderLicenses(userData.licenses || []);
-  
-  accts = userData.accounts ? [...userData.accounts] : [];
-  maxAccts = userData.maxAccounts || 1;
-  renderAccts();
-  
-  renderInvoices(userData.invoices || []);
-  
-  // 🆕 SESIUNEA 15: încarcă facturile actualizate cu PDF Stripe oficial
-  loadMyInvoices();
-
-  show('viewPortal');
-}
-
-function renderLicenses(licenses){
+  // Licenses
+  const licenses = userData.licenses || DEMO.licenses;
   const licEl = document.getElementById('licEl');
   licEl.innerHTML = '';
-  
-  if(licenses.length === 0){
-    licEl.innerHTML = `<div class="lic-card" style="text-align:center;color:var(--muted);font-size:13px;">${t('no-licenses')}</div>`;
-    // Re-evaluate selector EA (poate clientul are plan dar fără EA-uri alese încă)
-    loadEASelector();
-    return;
-  }
-  
   licenses.forEach(lic=>{
     const pct = Math.round((lic.daysLeft/lic.daysTotal)*100);
     const fillClass = pct>50?'prog-green':pct>20?'prog-warn':'prog-danger';
-    const symbolHtml = lic.symbol ? `<span style="font-size:12px;color:var(--muted);font-family:var(--mono);font-weight:400">· ${lic.symbol}</span>` : '';
     licEl.innerHTML += `
       <div class="lic-card">
         <div class="lic-header">
-          <div class="lic-name"><div class="lic-dot"></div>${lic.ea} ${symbolHtml}</div>
+          <div class="lic-name"><div class="lic-dot"></div>${lic.ea} <span style="font-size:12px;color:var(--muted);font-family:var(--mono);font-weight:400">· ${lic.symbol}</span></div>
           <span class="status-pill ${lic.active?'s-active':'s-expired'}">${lic.active?t('status-active'):t('status-expired')}</span>
         </div>
         <div class="lic-rows">
@@ -611,142 +437,31 @@ function renderLicenses(licenses){
         <div class="prog-lbl">${lic.daysLeft} ${t('days-left')} ${lic.daysTotal}</div>
       </div>`;
   });
-  
-  // 🆕 SESIUNEA 14: După render licențe, încărcăm și selectorul de EA-uri
-  loadEASelector();
-}
 
-// 🆕 SESIUNEA 14: Încarcă selectorul de EA-uri (vizibil doar pentru Basic/Pro)
-let eaSelectorData = null;
-async function loadEASelector(){
-  if(!currentEmail) return;
-  try {
-    const res = await fetch(`/api/my-eas?email=${encodeURIComponent(currentEmail)}`);
-    const data = await res.json();
-    if(data.error) return;
-    eaSelectorData = data;
-    
-    const wrap = document.getElementById('eaSelectorWrap');
-    
-    // Ascund selector dacă e Full Access (primește toate automat)
-    if(!data.can_choose){
-      wrap.style.display = 'none';
-      return;
-    }
-    
-    wrap.style.display = 'block';
-    document.getElementById('eaMaxCount').textContent = data.max_eas;
-    document.getElementById('eaChosenCount').textContent = data.active_eas.length;
-    
-    const list = document.getElementById('eaCheckList');
-    list.innerHTML = '';
-    data.all_eas.forEach(eaName => {
-      const isActive = data.active_eas.includes(eaName);
-      list.innerHTML += `
-        <label style="display:flex;align-items:center;padding:10px;background:rgba(255,255,255,0.03);border-radius:8px;margin-bottom:6px;cursor:pointer;">
-          <input type="checkbox" class="ea-check" value="${eaName}" ${isActive?'checked':''} onchange="updateEACount()" style="margin-right:10px;width:18px;height:18px;cursor:pointer;">
-          <span style="color:var(--text);">${eaName}</span>
-        </label>
-      `;
-    });
-  } catch(e) {
-    console.error('loadEASelector error:', e);
-  }
-}
+  // Accounts
+  accts = userData.accounts ? [...userData.accounts] : [...DEMO.accounts];
+  maxAccts = userData.maxAccounts || DEMO.maxAccounts;
+  renderAccts();
 
-function updateEACount(){
-  const checked = document.querySelectorAll('.ea-check:checked').length;
-  document.getElementById('eaChosenCount').textContent = checked;
-  
-  // Dacă a depășit limita, deselectez ultimul bifat
-  if(eaSelectorData && checked > eaSelectorData.max_eas){
-    const checks = document.querySelectorAll('.ea-check:checked');
-    checks[checks.length-1].checked = false;
-    document.getElementById('eaChosenCount').textContent = eaSelectorData.max_eas;
-    document.getElementById('eaErrEl').textContent = t('ea-limit-err');
-    setTimeout(() => document.getElementById('eaErrEl').textContent = '', 3000);
-  }
-}
-
-async function saveMyEAs(){
-  const checked = Array.from(document.querySelectorAll('.ea-check:checked')).map(c => c.value);
-  if(checked.length === 0){
-    document.getElementById('eaErrEl').textContent = t('ea-min-err');
-    return;
-  }
-  
-  document.getElementById('eaErrEl').textContent = '';
-  const btn = document.getElementById('eaSaveBtn');
-  btn.disabled = true;
-  btn.textContent = '...';
-  
-  try {
-    const res = await fetch(`/api/update-my-eas`, {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ email: currentEmail, ea_names: checked })
-    });
-    const data = await res.json();
-    if(data.success){
-      document.getElementById('eaOkEl').style.display = 'block';
-      setTimeout(() => document.getElementById('eaOkEl').style.display = 'none', 3000);
-      // Reload portal data + forțez render
-      const userData = await loadUserDataFromSupabase(currentUser);
-      if(userData) renderPortal(userData);
-    } else {
-      document.getElementById('eaErrEl').textContent = data.error || 'Eroare.';
-    }
-  } catch(e) {
-    document.getElementById('eaErrEl').textContent = t('connection-error');
-  } finally {
-    btn.disabled = false;
-    btn.textContent = t('ea-save');
-  }
-}
-
-function renderInvoices(invoices){
+  // Invoices
+  const invoices = userData.invoices || DEMO.invoices;
   const invEl = document.getElementById('invEl');
   invEl.innerHTML = '';
-  
-  if(!invoices || invoices.length === 0){
-    invEl.innerHTML = `<div style="text-align:center;color:var(--muted);font-size:13px;padding:12px 0;">${t('no-invoices')}</div>`;
-    return;
-  }
-  
+  const invName = userData.name || '';
+  const invEmail = userData.email || '';
   invoices.forEach(inv=>{
-    const planLabel = inv.plan ? ('Plan ' + (inv.plan.charAt(0).toUpperCase() + inv.plan.slice(1)).replace('_', ' ')) : 'Abonament';
-    const amountFmt = `€${inv.amount}`;
-    const dateFmt = inv.paid_at 
-      ? new Date(inv.paid_at).toLocaleDateString(lang === 'de' ? 'de-DE' : (lang === 'en' ? 'en-GB' : 'ro-RO'), {day:'2-digit', month:'short', year:'numeric'})
-      : new Date(inv.created_at).toLocaleDateString(lang === 'de' ? 'de-DE' : (lang === 'en' ? 'en-GB' : 'ro-RO'), {day:'2-digit', month:'short', year:'numeric'});
-    
-    const pdfButton = inv.pdf_url
-      ? `<a href="${inv.pdf_url}" target="_blank" rel="noopener" class="inv-btn" style="text-decoration:none;display:inline-block;">📄 ${t('inv-pdf')}</a>`
-      : `<span style="font-size:11px;color:var(--muted);font-style:italic;">PDF indisponibil</span>`;
-    
+    const invDate = inv.date;
+    const invPlan = inv.plan;
+    const invAmt = inv.amount;
     invEl.innerHTML += `
       <div class="inv-row">
-        <div><div class="inv-date">${dateFmt}</div><div class="inv-plan">${planLabel}</div></div>
-        <div style="display:flex;align-items:center;gap:12px">
-          <div class="inv-amount">${amountFmt}</div>
-          ${pdfButton}
-        </div>
+        <div><div class="inv-date">${inv.date}</div><div class="inv-plan">${inv.plan}</div></div>
+        <div style="display:flex;align-items:center"><div class="inv-amount">${inv.amount}</div>
+        <button class="inv-btn" onclick="generateInvoicePDF('${invDate}','${invPlan}','${invAmt}','${invName}','${invEmail}')">${t('inv-pdf')}</button></div>
       </div>`;
   });
-}
 
-// 🆕 SESIUNEA 15: Încarcă facturile din endpoint dedicat (cu PDF Stripe oficial)
-async function loadMyInvoices(){
-  if(!currentEmail) return;
-  try {
-    const res = await fetch(`/api/my-invoices?email=${encodeURIComponent(currentEmail)}`);
-    const data = await res.json();
-    if(data.invoices){
-      renderInvoices(data.invoices);
-    }
-  } catch(e){
-    console.error('Eroare încărcare facturi:', e);
-  }
+  show('viewPortal');
 }
 
 function renderAccts(){
@@ -754,61 +469,26 @@ function renderAccts(){
   document.getElementById('acctMaxEl').textContent = maxAccts;
   const list = document.getElementById('acctListEl');
   list.innerHTML = '';
-  
-  // Buton "Elimină" tradus
-  const rmLabel = lang === 'ro' ? 'Elimină' : (lang === 'en' ? 'Remove' : 'Entfernen');
-  
   accts.forEach(a=>{
     list.innerHTML += `
       <div class="acct-item">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#4d9fff" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
         <div class="acct-num">${a}</div>
         <div class="acct-ok">✓</div>
-        <button class="acct-rm" onclick="rmAcct('${a}')">${rmLabel}</button>
+        <button class="acct-rm" onclick="rmAcct('${a}')">${t('acct-used').replace('Conturi folosite:','Elimină').replace('Accounts used:','Remove').replace('Konten genutzt:','Entfernen')}</button>
       </div>`;
   });
   document.getElementById('limitEl').style.display   = accts.length>=maxAccts ? 'flex' : 'none';
   document.getElementById('addRowEl').style.display  = accts.length>=maxAccts ? 'none' : 'flex';
 }
 
-// ── 🆕 ADD ACCT — salvează în Supabase ────────────────────────────────────────
-async function addAcct(){
+function addAcct(){
   const val = document.getElementById('newAcctEl').value.trim();
   const ok  = document.getElementById('acctOkEl');
   const err = document.getElementById('acctErrEl');
   ok.style.display='none'; err.style.display='none';
-  
   if(!val||val.length<5){ err.textContent=t('acct-err-empty'); err.style.display='block'; return; }
   if(accts.includes(val)){ err.textContent=t('acct-err-exists'); err.style.display='block'; return; }
-  if(!currentUserId){ err.textContent=t('acct-err-save'); err.style.display='block'; return; }
-  
-  // Caut subscription_id curent (dacă există)
-  const { data: subRow } = await sb
-    .from('subscriptions')
-    .select('id')
-    .eq('user_id', currentUserId)
-    .in('status', ['active', 'grace_period'])
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  
-  // INSERT în mt5_accounts
-  const { error: insErr } = await sb
-    .from('mt5_accounts')
-    .insert({
-      user_id: currentUserId,
-      subscription_id: subRow ? subRow.id : null,
-      account_number: val,
-      is_active: true
-    });
-  
-  if(insErr){
-    console.error('Insert error:', insErr);
-    err.textContent = t('acct-err-save') + ' (' + insErr.message + ')';
-    err.style.display='block';
-    return;
-  }
-  
   accts.push(val);
   document.getElementById('newAcctEl').value='';
   ok.textContent=t('acct-ok'); ok.style.display='block';
@@ -816,26 +496,9 @@ async function addAcct(){
   renderAccts();
 }
 
-// ── 🆕 REMOVE ACCT — șterge din Supabase ──────────────────────────────────────
-async function rmAcct(id){
+function rmAcct(id){
   if(!confirm(t('confirm-rm')+id+'?')) return;
-  if(!currentUserId){ return; }
-  
-  // Soft delete: marcăm is_active=false (păstrăm istoric)
-  const { error: delErr } = await sb
-    .from('mt5_accounts')
-    .update({ is_active: false, removed_at: new Date().toISOString() })
-    .eq('user_id', currentUserId)
-    .eq('account_number', id);
-  
-  if(delErr){
-    console.error('Delete error:', delErr);
-    alert('Eroare la ștergere: ' + delErr.message);
-    return;
-  }
-  
-  accts = accts.filter(a => a !== id);
-  renderAccts();
+  accts=accts.filter(a=>a!==id); renderAccts();
 }
 
 // ── AUTH ──────────────────────────────────────────────────────────────────────
@@ -847,32 +510,21 @@ async function loginGoogle(){
   if(error) alert('Eroare: '+error.message);
 }
 
-async function doLogin(){
+function doLogin(){
   const email = document.getElementById('lEmail').value.trim();
   const pass  = document.getElementById('lPass').value;
   const err   = document.getElementById('lErr');
   const ok    = document.getElementById('lOk');
   err.style.display='none'; ok.style.display='none';
   if(!email||!pass){ err.textContent=t('le-empty'); err.style.display='block'; return; }
-  
   ok.textContent='Se conectează...'; ok.style.display='block';
-  
-  const { data, error } = await sb.auth.signInWithPassword({ email, password: pass });
-  
-  if(error){
+  setTimeout(()=>{
     ok.style.display='none';
-    err.textContent = t('le-inv');
-    err.style.display = 'block';
-    return;
-  }
-  
-  // Login OK — încarcă datele
-  show('viewLoading');
-  const userData = await loadUserDataFromSupabase(data.user);
-  renderPortal(userData);
+    renderPortal({ name: email.split('@')[0], ...DEMO });
+  },1000);
 }
 
-async function doRegister(){
+function doRegister(){
   const email = document.getElementById('rEmail').value.trim();
   const pass  = document.getElementById('rPass').value;
   const mt5   = document.getElementById('rMt5').value.trim();
@@ -880,136 +532,16 @@ async function doRegister(){
   const ok    = document.getElementById('rOk');
   err.style.display='none'; ok.style.display='none';
   if(!email||!pass||!mt5){ err.textContent=t('re-empty'); err.style.display='block'; return; }
-  
-  const { data, error } = await sb.auth.signUp({ email, password: pass });
-  
-  if(error){
-    err.textContent = error.message;
-    err.style.display='block';
-    return;
-  }
-  
-  // Salvăm numărul MT5 introdus la înregistrare (după ce avem user_id)
-  // Notă: dacă confirmarea email e activă, userul nu va fi logat imediat
-  if(data.user){
-    // Creează entry în users
-    await sb.from('users').insert({
-      email: email,
-      full_name: email.split('@')[0],
-      google_id: data.user.id
-    }).select().single().then(async (res) => {
-      if(res.data){
-        // Adaugă contul MT5
-        await sb.from('mt5_accounts').insert({
-          user_id: res.data.id,
-          account_number: mt5,
-          is_active: true
-        });
-      }
-    });
-  }
-  
   ok.textContent=t('re-ok'); ok.style.display='block';
-}
-
-// ── 🆕 ACȚIUNI RAPIDE — butoane funcționale ───────────────────────────────────
-async function openCustomerPortal(){
-  if(!currentEmail){
-    alert(t('must-login'));
-    return;
-  }
-  try{
-    const res = await fetch('/api/customer-portal', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({email: currentEmail})
-    });
-    const data = await res.json();
-    if(data.url){
-      window.location.href = data.url;
-    } else {
-      alert(t('no-subscription'));
-    }
-  }catch(e){
-    alert(t('connection-error'));
-  }
-}
-
-function downloadEA(){
-  if(!currentUserData || !currentUserData.licenses || currentUserData.licenses.length === 0){
-    alert(t('no-eas'));
-    return;
-  }
-  
-  const activeEAs = currentUserData.licenses.filter(l => l.active);
-  if(activeEAs.length === 0){
-    alert(t('no-eas'));
-    return;
-  }
-  
-  // Construim listă numerotată cu EA-uri
-  let msg = t('active-eas') + '\n\n';
-  activeEAs.forEach((l, i) => {
-    msg += `${i+1}. ${l.ea}\n`;
-  });
-  msg += '\n' + (lang === 'ro' ? 'Introdu numărul EA-ului pe care vrei să-l descarci (1-' + activeEAs.length + '):' :
-                  lang === 'en' ? 'Enter the number of the EA you want to download (1-' + activeEAs.length + '):' :
-                  'Geben Sie die Nummer des EA ein, den Sie herunterladen möchten (1-' + activeEAs.length + '):');
-  
-  const choice = prompt(msg);
-  if(!choice) return;
-  
-  const idx = parseInt(choice, 10) - 1;
-  if(isNaN(idx) || idx < 0 || idx >= activeEAs.length){
-    alert(lang === 'ro' ? 'Număr invalid' : lang === 'en' ? 'Invalid number' : 'Ungültige Nummer');
-    return;
-  }
-  
-  const selectedEA = activeEAs[idx];
-  doDownloadEA(selectedEA.ea);
-}
-
-async function doDownloadEA(eaName){
-  try{
-    const res = await fetch('/api/download-ea', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ email: currentEmail, ea_name: eaName })
-    });
-    const data = await res.json();
-    if(data.url){
-      // Deschid link-ul pentru descărcare automat
-      window.open(data.url, '_blank');
-    } else {
-      alert((lang === 'ro' ? 'Eroare: ' : lang === 'en' ? 'Error: ' : 'Fehler: ') + (data.error || 'unknown'));
-    }
-  }catch(e){
-    alert(t('connection-error'));
-  }
 }
 
 async function doLogout(){
   await sb.auth.signOut();
-  currentUser = null;
-  currentUserId = null;
-  currentEmail = null;
-  currentUserData = {};
   show('viewLogin'); showForm('login');
 }
 
-// ── 🆕 CONECTARE DISCORD ──────────────────────────────────────────────────────
-function connectDiscord(e){
-  if(e) e.preventDefault();
-  if(!currentEmail){
-    alert('Trebuie să fii logat pentru a conecta Discord.');
-    return;
-  }
-  // Trimitem emailul prin URL ca să-l recuperăm la callback
-  window.location.href = '/auth/discord?email=' + encodeURIComponent(currentEmail);
-}
 
-
-// ── PDF FACTURA CLIENT (neschimbat — design intact) ───────────────────────────
+// ── PDF FACTURA CLIENT ────────────────────────────────────────────────────────
 function generateInvoicePDF(date, plan, amount, userName, userEmail) {
   const win = window.open('', '_blank');
   win.document.write(`<!DOCTYPE html>
@@ -1098,12 +630,16 @@ const bmap={'ro':0,'en':1,'de':2};
 if(btns[bmap[det]]) btns[bmap[det]].classList.add('active');
 applyLang(det);
 
-// Check session — încarcă din Supabase dacă suntem logați
+// Check session
 (async()=>{
   const { data:{ session } } = await sb.auth.getSession();
   if(session && session.user){
-    const userData = await loadUserDataFromSupabase(session.user);
-    renderPortal(userData);
+    const u = session.user;
+    renderPortal({
+      name: u.user_metadata?.full_name || u.email,
+      email: u.email,
+      ...DEMO
+    });
   } else {
     show('viewLogin'); showForm('login');
   }
