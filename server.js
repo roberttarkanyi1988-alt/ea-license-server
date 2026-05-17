@@ -804,12 +804,22 @@ app.get('/api/discord-test', async (req, res) => {
 app.post('/api/create-payment', async (req, res) => {
   const { account_id, email, months = 1, plan = 'basic', eas = '' } = req.body;
   if (!account_id) return res.status(400).json({ error: 'account_id required' });
+  
+  // 🆕 SESIUNEA 13: Mapare price_id după plan
+  const PLAN_PRICES = {
+    'basic': process.env.STRIPE_PRICE_BASIC || process.env.STRIPE_PRICE_ID,
+    'pro': process.env.STRIPE_PRICE_PRO || process.env.STRIPE_PRICE_ID,
+    'full': process.env.STRIPE_PRICE_FULL || process.env.STRIPE_PRICE_ID,
+    'full_access': process.env.STRIPE_PRICE_FULL || process.env.STRIPE_PRICE_ID
+  };
+  const priceId = PLAN_PRICES[plan.toLowerCase()] || PLAN_PRICES['basic'];
+  
   try {
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       mode: 'subscription',
       customer_email: email || undefined,
-      line_items: [{ price: process.env.STRIPE_PRICE_ID, quantity: months }],
+      line_items: [{ price: priceId, quantity: months }],
       metadata: {
         account_id,
         months: String(months),
