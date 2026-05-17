@@ -750,12 +750,33 @@ app.get('/auth/discord/callback', async (req, res) => {
       </body></html>`);
     }
 
+    // 🆕 SESIUNEA 14: Auto-verificare abonament activ → dă rolul automat
+    let autoRoleMsg = '';
+    try {
+      const subCheck = await pool.query(
+        `SELECT plan FROM subscriptions WHERE user_id=$1 AND status IN ('active', 'grace_period') LIMIT 1`,
+        [upd.rows[0].id]
+      );
+      if (subCheck.rows.length > 0) {
+        const plan = subCheck.rows[0].plan;
+        const planForDiscord = plan === 'full_access' ? 'full' : plan;
+        const roleAdded = await addDiscordRole(portalEmail, planForDiscord);
+        if (roleAdded) {
+          autoRoleMsg = `<p style="color:#00e5a0;font-size:14px;">🎉 Rolul <b>${plan.toUpperCase()}</b> a fost adăugat automat pe Discord!</p>`;
+          await sendTelegram(`💬 <b>Discord conectat + rol auto:</b>\n📧 ${portalEmail}\n📦 Plan: ${plan}`);
+        }
+      }
+    } catch (e) {
+      console.error('Auto-role error:', e.message);
+    }
+
     // Redirect înapoi la portal
     res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:50px;background:#0a0c0f;color:#e8eaf0;">
       <h1 style="color:#00e5a0;">✅ Discord conectat!</h1>
       <p>Contul Discord <b>${discordUsername}</b> a fost conectat la <b>${portalEmail}</b></p>
+      ${autoRoleMsg}
       <a href="/client" style="color:#00e5a0;">Înapoi la portal →</a>
-      <script>setTimeout(() => window.location.href='/client', 2500);</script>
+      <script>setTimeout(() => window.location.href='/client', 3500);</script>
     </body></html>`);
 
   } catch (err) {
