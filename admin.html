@@ -522,7 +522,11 @@ function updateMetrics(){
     const days = Math.ceil((new Date(c.expires_at)-now)/86400000);
     return c.status==='active' && days<=7 && days>0;
   }).length;
-  const revenue = active * 45;
+  // Calcul revenue corect pe baza planului fiecărui client
+  const PLAN_PRICES = { 'basic': 25, 'pro': 45, 'full': 70, 'full_access': 70, 'monthly': 45 };
+  const revenue = allClients
+    .filter(c => c.status === 'active')
+    .reduce((sum, c) => sum + (PLAN_PRICES[c.plan?.toLowerCase()] || 25), 0);
   document.getElementById('mActive').textContent = active;
   document.getElementById('mActiveSub').textContent = `din ${total} total`;
   document.getElementById('mRevenue').textContent = `€${revenue}`;
@@ -669,7 +673,10 @@ function generateAdminPDF() {
   const now = new Date();
   const dateStr = now.toLocaleDateString('ro-RO');
   const active = allClients.filter(c=>c.status==='active').length;
-  const revenue = active * 45;
+  const PLAN_PRICES_PDF = { 'basic': 25, 'pro': 45, 'full': 70, 'full_access': 70, 'monthly': 45 };
+  const revenue = allClients
+    .filter(c => c.status === 'active')
+    .reduce((sum, c) => sum + (PLAN_PRICES_PDF[c.plan?.toLowerCase()] || 25), 0);
 
   const rows = allClients.map(c => {
     const exp = new Date(c.expires_at);
