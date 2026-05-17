@@ -616,6 +616,116 @@ app.post('/api/download-ea', async (req, res) => {
   }
 });
 
+// 🆕 SESIUNEA 14: Endpoint - lista EA-uri disponibile + cele active ale userului
+app.get('/api/my-eas', async (req, res) => {
+  const { email } = req.query;
+  if (!email) return res.status(400).json({ error: 'email required' });
+  
+  const ALL_EAS = [
+    { name: 'ZigZag Fibo EA', file: 'Fibo_Final_V3.ex5' },
+    { name: 'Killer Indices EA', file: 'Killer_Indices_RobertAbo_V3.ex5' },
+    { name: 'Meneger Stock EA', file: 'Meneger_Stock_MarketsABO_V3.ex5' },
+    { name: 'Range Breakout EA', file: 'Range_Breakout_Abo_V3.ex5' },
+    { name: 'Robert Long EA', file: 'Robert_Long_Indices_ABO_V3.ex5' },
+    { name: 'Simple BuyDay EA', file: 'Simple__BuyDay_EAABO_V3.ex5' }
+  ];
+  
+  try {
+    const userRes = await pool.query(`
+      SELECT u.id, s.plan 
+      FROM users u 
+      LEFT JOIN subscriptions s ON s.user_id=u.id 
+      WHERE u.email=$1
+    `, [email]);
+    
+    if (userRes.rows.length === 0) return res.status(404).json({ error: 'user not found' });
+    const { id: userId, plan } = userRes.rows[0];
+    
+    // Max EA-uri permise pe plan
+    const planLimits = { 'basic': 1, 'pro': 3, 'full_access': 6 };
+    const maxEAs = planLimits[plan] || 1;
+    
+    // EA-urile active ale userului
+    const activeRes = await pool.query(
+      `SELECT ea_name FROM ea_licenses WHERE user_id=$1 AND status='active'`,
+      [userId]
+    );
+    const activeNames = activeRes.rows.map(r => r.ea_name);
+    
+    res.json({
+      plan: plan,
+      max_eas: maxEAs,
+      can_choose: plan !== 'full_access', // Full primește toate automat
+      all_eas: ALL_EAS.map(e => e.name),
+      active_eas: activeNames
+    });
+  } catch (e) {
+    console.error('my-eas error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// 🆕 SESIUNEA 14: Endpoint - clientul își alege EA-urile
+app.post('/api/update-my-eas', async (req, res) => {
+  const { email, ea_names } = req.body;
+  if (!email || !Array.isArray(ea_names)) return res.status(400).json({ error: 'email and ea_names required' });
+  
+  const EA_MAP = {
+    'ZigZag Fibo EA': 'Fibo_Final_V3.ex5',
+    'Killer Indices EA': 'Killer_Indices_RobertAbo_V3.ex5',
+    'Meneger Stock EA': 'Meneger_Stock_MarketsABO_V3.ex5',
+    'Range Breakout EA': 'Range_Breakout_Abo_V3.ex5',
+    'Robert Long EA': 'Robert_Long_Indices_ABO_V3.ex5',
+    'Simple BuyDay EA': 'Simple__BuyDay_EAABO_V3.ex5'
+  };
+  const ALL_EAS = Object.keys(EA_MAP);
+  
+  try {
+    // Verific user și plan
+    const userRes = await pool.query(`
+      SELECT u.id, s.id AS sub_id, s.plan, s.current_period_end
+      FROM users u 
+      LEFT JOIN subscriptions s ON s.user_id=u.id 
+      WHERE u.email=$1
+    `, [email]);
+    
+    if (userRes.rows.length === 0) return res.status(404).json({ error: 'user not found' });
+    const { id: userId, sub_id: subId, plan, current_period_end } = userRes.rows[0];
+    
+    // Verific dacă userul poate alege (Full primește toate automat)
+    if (plan === 'full_access') return res.status(400).json({ error: 'Full Access primește toate EA-urile automat' });
+    
+    // Verific limita
+    const planLimits = { 'basic': 1, 'pro': 3 };
+    const maxEAs = planLimits[plan];
+    if (!maxEAs) return res.status(400).json({ error: 'Plan invalid' });
+    
+    // Validez EA-urile alese
+    const valid = ea_names.filter(name => ALL_EAS.includes(name));
+    if (valid.length === 0) return res.status(400).json({ error: 'Niciun EA valid' });
+    if (valid.length > maxEAs) return res.status(400).json({ error: `Maxim ${maxEAs} EA-uri pentru planul ${plan}` });
+    
+    // Șterg toate EA-urile vechi și adaug doar cele alese
+    await pool.query('DELETE FROM ea_licenses WHERE user_id=$1', [userId]);
+    
+    const expires = current_period_end || new Date(Date.now() + 30*24*60*60*1000).toISOString();
+    for (const eaName of valid) {
+      await pool.query(
+        `INSERT INTO ea_licenses (user_id, subscription_id, ea_name, file_name, status, activated_at, expires_at)
+         VALUES ($1, $2, $3, $4, 'active', NOW(), $5)`,
+        [userId, subId, eaName, EA_MAP[eaName], expires]
+      );
+    }
+    
+    await sendTelegram(`✏️ <b>EA-uri actualizate de client</b>\n📧 ${email}\n📦 Plan: ${plan}\n🤖 EA-uri: ${valid.join(', ')}`);
+    
+    res.json({ success: true, active_eas: valid, max_eas: maxEAs });
+  } catch (e) {
+    console.error('update-my-eas error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // 🆕 SESIUNEA 12: Endpoint admin pentru detectare abuzuri
 app.get('/admin/abuse-report', adminAuth, async (req, res) => {
   try {
@@ -1081,8 +1191,9 @@ app.post('/webhook', async (req, res) => {
         [legacyPlan, legacyExpires, user.email]
       );
       
-      // Update EA-uri: doar dacă upgrade la full_access, adaug toate 6
-      // Pentru downgrade, păstrează cele existente (clientul va folosi mai puține)
+      // 🆕 SESIUNEA 14: La schimbare plan, șterg EA-urile vechi
+      // - Pentru full_access → adaug toate 6 automat
+      // - Pentru basic/pro → șterg toate (clientul alege din portal)
       const EA_MAP = {
         'ZigZag Fibo EA': 'Fibo_Final_V3.ex5',
         'Killer Indices EA': 'Killer_Indices_RobertAbo_V3.ex5',
@@ -1092,20 +1203,21 @@ app.post('/webhook', async (req, res) => {
         'Simple BuyDay EA': 'Simple__BuyDay_EAABO_V3.ex5'
       };
       
+      // Șterg toate EA-urile vechi
+      await pool.query('DELETE FROM ea_licenses WHERE user_id=$1', [user.id]);
+      
       if (newPlan === 'full_access') {
-        // Adaug toate EA-urile (păstrez ce există + adaug cele lipsă)
+        // Full = adaug toate 6 automat
         const subId = (await pool.query('SELECT id FROM subscriptions WHERE user_id=$1', [user.id])).rows[0].id;
         for (const [eaName, fileName] of Object.entries(EA_MAP)) {
-          const exists = await pool.query('SELECT id FROM ea_licenses WHERE user_id=$1 AND ea_name=$2', [user.id, eaName]);
-          if (exists.rows.length === 0) {
-            await pool.query(
-              `INSERT INTO ea_licenses (user_id, subscription_id, ea_name, file_name, status, activated_at, expires_at)
-               VALUES ($1, $2, $3, $4, 'active', NOW(), $5)`,
-              [user.id, subId, eaName, fileName, periodEnd.toISOString()]
-            );
-          }
+          await pool.query(
+            `INSERT INTO ea_licenses (user_id, subscription_id, ea_name, file_name, status, activated_at, expires_at)
+             VALUES ($1, $2, $3, $4, 'active', NOW(), $5)`,
+            [user.id, subId, eaName, fileName, periodEnd.toISOString()]
+          );
         }
       }
+      // Pentru basic/pro: rămân fără EA-uri, clientul va alege din portal
       
       // Update Discord rol
       await addDiscordRole(user.email, newPlan === 'full_access' ? 'full' : newPlan);
