@@ -110,6 +110,76 @@ async function sendTelegram(message) {
   }
 }
 
+// 🆕 SESIUNEA 15-FIX: Funcție helper pentru salvarea facturii din Stripe
+// Apelată din customer.subscription.updated (eveniment care vine 100%)
+async function saveInvoiceFromStripe(invoiceId, userId, subId, userEmail) {
+  try {
+    if (!invoiceId) {
+      console.log('saveInvoice: invoiceId lipsește');
+      return false;
+    }
+
+    // Cer factura completă de la Stripe
+    const inv = await stripe.invoices.retrieve(invoiceId);
+    if (!inv) {
+      console.log(`saveInvoice: factura ${invoiceId} negăsită în Stripe`);
+      return false;
+    }
+
+    // Verific dacă factura există deja în DB (evităm duplicate)
+    const existing = await pool.query(
+      'SELECT id FROM invoices WHERE stripe_invoice_id = $1 LIMIT 1',
+      [inv.id]
+    );
+
+    const amount = inv.amount_paid || inv.amount_due || 0;
+    const pdfUrl = inv.invoice_pdf || inv.hosted_invoice_url || null;
+    const status = inv.status || 'paid';
+    const paidAt = inv.status_transitions?.paid_at
+      ? new Date(inv.status_transitions.paid_at * 1000)
+      : new Date();
+
+    await pool.query(`
+      INSERT INTO invoices (
+        user_id, subscription_id, stripe_invoice_id,
+        amount_cents, currency, status, invoice_pdf_url, paid_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      ON CONFLICT (stripe_invoice_id) DO UPDATE SET
+        status = excluded.status,
+        invoice_pdf_url = excluded.invoice_pdf_url,
+        paid_at = excluded.paid_at
+    `, [
+      userId,
+      subId,
+      inv.id,
+      amount,
+      (inv.currency || 'eur').toLowerCase(),
+      status,
+      pdfUrl,
+      paidAt
+    ]);
+
+    // Trimit notificare DOAR dacă factura e nouă (nu update)
+    if (existing.rows.length === 0 && amount > 0) {
+      console.log(`✅ Factură salvată: ${inv.id} pentru ${userEmail}, €${(amount/100).toFixed(2)}`);
+      await sendTelegram(
+        `🧾 <b>Factură nouă salvată</b>\n` +
+        `📧 ${userEmail || 'N/A'}\n` +
+        `💰 €${(amount/100).toFixed(2)}\n` +
+        `📄 PDF: disponibil în portal client`
+      );
+    } else if (existing.rows.length > 0) {
+      console.log(`ℹ️ Factură ${inv.id} actualizată (existentă)`);
+    }
+
+    return true;
+  } catch (e) {
+    console.error('saveInvoiceFromStripe error:', e.message);
+    return false;
+  }
+}
+
 // ─── DISCORD BOT ──────────────────────────────────────────────────────────────
 const DISCORD_GUILD_ID = '1500420643290615918';
 const DISCORD_ROLES = {
@@ -1160,6 +1230,11 @@ app.post('/webhook', async (req, res) => {
         }
         
         console.log(`✅ Webhook: user ${email} (id=${userId}) actualizat la ${planForSub}, ${eaList.length} EA-uri`);
+
+        // 🆕 SESIUNEA 15-FIX: Salvez factura din checkout (dacă există)
+        if (session.invoice) {
+          await saveInvoiceFromStripe(session.invoice, userId, subId, email);
+        }
       } catch (e) {
         console.error('Webhook NEW system error:', e.message);
         await sendTelegram(`⚠️ <b>Eroare sistem nou:</b>\n${e.message}\n📧 ${email}`);
@@ -1258,14 +1333,17 @@ app.post('/webhook', async (req, res) => {
       // Șterg toate EA-urile vechi
       await pool.query('DELETE FROM ea_licenses WHERE user_id=$1', [user.id]);
       
-      if (newPlan === 'full_access') {
+      // Iau sub_id pentru folosire ulterioară
+      const subQuery = await pool.query('SELECT id FROM subscriptions WHERE user_id=$1', [user.id]);
+      const subIdForUser = subQuery.rows[0]?.id;
+      
+      if (newPlan === 'full_access' && subIdForUser) {
         // Full = adaug toate 6 automat
-        const subId = (await pool.query('SELECT id FROM subscriptions WHERE user_id=$1', [user.id])).rows[0].id;
         for (const [eaName, fileName] of Object.entries(EA_MAP)) {
           await pool.query(
             `INSERT INTO ea_licenses (user_id, subscription_id, ea_name, file_name, status, activated_at, expires_at)
              VALUES ($1, $2, $3, $4, 'active', NOW(), $5)`,
-            [user.id, subId, eaName, fileName, periodEnd.toISOString()]
+            [user.id, subIdForUser, eaName, fileName, periodEnd.toISOString()]
           );
         }
       }
@@ -1280,6 +1358,13 @@ app.post('/webhook', async (req, res) => {
       );
       
       console.log(`✅ Subscription updated for ${user.email}: ${newPlan}`);
+
+      // 🆕 SESIUNEA 15-FIX: Salvez factura din latest_invoice
+      // Aceasta e SOLUȚIA pentru problema cu invoice.paid care nu vine!
+      // customer.subscription.updated vine 100% și conține latest_invoice
+      if (sub.latest_invoice && subIdForUser) {
+        await saveInvoiceFromStripe(sub.latest_invoice, user.id, subIdForUser, user.email);
+      }
     } catch (e) {
       console.error('Subscription update error:', e.message);
       await sendTelegram(`⚠️ <b>Eroare update sub:</b>\n${e.message}`);
@@ -1327,6 +1412,8 @@ app.post('/webhook', async (req, res) => {
     }
   }
 
+  // 🆕 SESIUNEA 15: Handler pentru invoice.paid (BACKUP — Stripe poate să nu-l trimită mereu)
+  // Soluția principală e în customer.subscription.updated mai sus (care vine 100%)
   if (event.type === 'invoice.paid' || event.type === 'invoice.payment_succeeded') {
     const inv = event.data.object;
     const customerEmail = inv.customer_email || (inv.customer_address && inv.customer_address.email);
@@ -1336,19 +1423,20 @@ app.post('/webhook', async (req, res) => {
       let userQuery = null;
       if (inv.customer) {
         userQuery = await pool.query(
-          `SELECT id FROM users WHERE stripe_customer_id = $1 LIMIT 1`,
+          `SELECT id, email FROM users WHERE stripe_customer_id = $1 LIMIT 1`,
           [inv.customer]
         );
       }
       if ((!userQuery || userQuery.rows.length === 0) && customerEmail) {
         userQuery = await pool.query(
-          `SELECT id FROM users WHERE email = $1 LIMIT 1`,
+          `SELECT id, email FROM users WHERE email = $1 LIMIT 1`,
           [customerEmail]
         );
       }
 
       if (userQuery && userQuery.rows.length > 0) {
         const userId = userQuery.rows[0].id;
+        const userEmail = userQuery.rows[0].email || customerEmail;
 
         // Găsim subscription_id dacă există
         let subId = null;
@@ -1360,42 +1448,13 @@ app.post('/webhook', async (req, res) => {
           if (subQuery.rows.length > 0) subId = subQuery.rows[0].id;
         }
 
-        // Salvăm factura în Supabase (upsert pe stripe_invoice_id)
-        await pool.query(`
-          INSERT INTO invoices (
-            user_id, subscription_id, stripe_invoice_id,
-            amount_cents, currency, status, invoice_pdf_url, paid_at
-          )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-          ON CONFLICT (stripe_invoice_id) DO UPDATE SET
-            status = excluded.status,
-            invoice_pdf_url = excluded.invoice_pdf_url,
-            paid_at = excluded.paid_at
-        `, [
-          userId,
-          subId,
-          inv.id,
-          inv.amount_paid || inv.amount_due || 0,
-          (inv.currency || 'eur').toLowerCase(),
-          'paid',
-          inv.invoice_pdf || inv.hosted_invoice_url || null,
-          inv.status_transitions?.paid_at
-            ? new Date(inv.status_transitions.paid_at * 1000)
-            : new Date()
-        ]);
-
-        console.log(`✅ Factură salvată: ${inv.id} pentru user_id=${userId}, €${(inv.amount_paid/100).toFixed(2)}`);
-        await sendTelegram(
-          `🧾 <b>Factură nouă salvată</b>\n` +
-          `📧 ${customerEmail || 'N/A'}\n` +
-          `💰 €${((inv.amount_paid || 0)/100).toFixed(2)}\n` +
-          `📄 PDF: disponibil în portal client`
-        );
+        // Folosim funcția unificată (face și deduplicate)
+        await saveInvoiceFromStripe(inv.id, userId, subId, userEmail);
       } else {
         console.warn(`⚠️ Invoice ${inv.id} primit dar user negăsit (email: ${customerEmail})`);
       }
     } catch (e) {
-      console.error('Eroare salvare factură:', e.message);
+      console.error('Eroare salvare factură (invoice.paid handler):', e.message);
     }
   }
 
