@@ -575,6 +575,9 @@ function renderPortal(userData){
   renderAccts();
   
   renderInvoices(userData.invoices || []);
+  
+  // 🆕 SESIUNEA 15: încarcă facturile actualizate cu PDF Stripe oficial
+  loadMyInvoices();
 
   show('viewPortal');
 }
@@ -705,21 +708,45 @@ function renderInvoices(invoices){
   const invEl = document.getElementById('invEl');
   invEl.innerHTML = '';
   
-  if(invoices.length === 0){
+  if(!invoices || invoices.length === 0){
     invEl.innerHTML = `<div style="text-align:center;color:var(--muted);font-size:13px;padding:12px 0;">${t('no-invoices')}</div>`;
     return;
   }
   
   invoices.forEach(inv=>{
-    const invName = (currentUserData.name || '').replace(/'/g, "\\'");
-    const invEmail = (currentUserData.email || '').replace(/'/g, "\\'");
+    const planLabel = inv.plan ? ('Plan ' + (inv.plan.charAt(0).toUpperCase() + inv.plan.slice(1)).replace('_', ' ')) : 'Abonament';
+    const amountFmt = `€${inv.amount}`;
+    const dateFmt = inv.paid_at 
+      ? new Date(inv.paid_at).toLocaleDateString(lang === 'de' ? 'de-DE' : (lang === 'en' ? 'en-GB' : 'ro-RO'), {day:'2-digit', month:'short', year:'numeric'})
+      : new Date(inv.created_at).toLocaleDateString(lang === 'de' ? 'de-DE' : (lang === 'en' ? 'en-GB' : 'ro-RO'), {day:'2-digit', month:'short', year:'numeric'});
+    
+    const pdfButton = inv.pdf_url
+      ? `<a href="${inv.pdf_url}" target="_blank" rel="noopener" class="inv-btn" style="text-decoration:none;display:inline-block;">📄 ${t('inv-pdf')}</a>`
+      : `<span style="font-size:11px;color:var(--muted);font-style:italic;">PDF indisponibil</span>`;
+    
     invEl.innerHTML += `
       <div class="inv-row">
-        <div><div class="inv-date">${inv.date}</div><div class="inv-plan">${inv.plan}</div></div>
-        <div style="display:flex;align-items:center"><div class="inv-amount">${inv.amount}</div>
-        <button class="inv-btn" onclick="generateInvoicePDF('${inv.date}','${inv.plan}','${inv.amount}','${invName}','${invEmail}')">${t('inv-pdf')}</button></div>
+        <div><div class="inv-date">${dateFmt}</div><div class="inv-plan">${planLabel}</div></div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <div class="inv-amount">${amountFmt}</div>
+          ${pdfButton}
+        </div>
       </div>`;
   });
+}
+
+// 🆕 SESIUNEA 15: Încarcă facturile din endpoint dedicat (cu PDF Stripe oficial)
+async function loadMyInvoices(){
+  if(!currentEmail) return;
+  try {
+    const res = await fetch(`/api/my-invoices?email=${encodeURIComponent(currentEmail)}`);
+    const data = await res.json();
+    if(data.invoices){
+      renderInvoices(data.invoices);
+    }
+  } catch(e){
+    console.error('Eroare încărcare facturi:', e);
+  }
 }
 
 function renderAccts(){
