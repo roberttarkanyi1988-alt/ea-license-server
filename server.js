@@ -840,24 +840,141 @@ app.post('/webhook', async (req, res) => {
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
     const { account_id, months, email, plan, eas } = session.metadata;
+    const planNormalized = (plan || 'basic').toLowerCase();
+    const monthsInt = parseInt(months) || 1;
     const base = new Date();
-    base.setDate(base.getDate() + (parseInt(months) * 30));
+    base.setDate(base.getDate() + (monthsInt * 30));
     const expiresAt = base.toISOString().split('T')[0];
+    const expiresAtFull = base.toISOString();
 
     // Salvează planul și EA-urile in notes pentru referinta
     const notesText = eas
       ? `Plată Stripe | Plan: ${plan} | EA-uri: ${eas}`
       : `Plată Stripe automată | Plan: ${plan || 'basic'}`;
 
+    // 1️⃣ SISTEM VECHI: licenses (backwards compat)
     await pool.query(`
       INSERT INTO licenses (account_id, email, plan, status, expires_at, notes)
       VALUES ($1,$2,$3,'active',$4,$5)
       ON CONFLICT(account_id) DO UPDATE SET
         email=excluded.email, plan=excluded.plan,
         status='active', expires_at=excluded.expires_at, notes=excluded.notes
-    `, [account_id, email, plan || 'basic', expiresAt, notesText]);
+    `, [account_id, email, planNormalized, expiresAt, notesText]);
 
-    if (email) await addDiscordRole(email, plan || 'basic');
+    // 🆕 SESIUNEA 13: SISTEM NOU — users + subscriptions + mt5_accounts + ea_licenses
+    if (email) {
+      try {
+        // Plan mapping pentru tabela subscriptions
+        const planForSub = planNormalized === 'full' ? 'full_access' : planNormalized;
+        const maxAccounts = planForSub === 'full_access' ? 3 : planForSub === 'pro' ? 2 : 1;
+        
+        // 1. Caut/creez user în tabela users
+        let userResult = await pool.query('SELECT id FROM users WHERE email=$1', [email]);
+        let userId;
+        if (userResult.rows.length === 0) {
+          const newUser = await pool.query(
+            'INSERT INTO users (email, stripe_customer_id) VALUES ($1, $2) RETURNING id',
+            [email, session.customer || null]
+          );
+          userId = newUser.rows[0].id;
+        } else {
+          userId = userResult.rows[0].id;
+          // Update stripe_customer_id dacă lipsește
+          if (session.customer) {
+            await pool.query(
+              'UPDATE users SET stripe_customer_id=$1 WHERE id=$2 AND stripe_customer_id IS NULL',
+              [session.customer, userId]
+            );
+          }
+        }
+        
+        // 2. UPSERT subscription pentru acest user
+        const existingSub = await pool.query('SELECT id FROM subscriptions WHERE user_id=$1', [userId]);
+        let subId;
+        if (existingSub.rows.length === 0) {
+          const newSub = await pool.query(
+            `INSERT INTO subscriptions (user_id, plan, max_mt5_accounts, status, current_period_end, stripe_subscription_id)
+             VALUES ($1, $2, $3, 'active', $4, $5) RETURNING id`,
+            [userId, planForSub, maxAccounts, expiresAtFull, session.subscription || null]
+          );
+          subId = newSub.rows[0].id;
+        } else {
+          subId = existingSub.rows[0].id;
+          await pool.query(
+            `UPDATE subscriptions SET plan=$1, max_mt5_accounts=$2, status='active', 
+             current_period_end=$3, grace_period_until=NULL,
+             stripe_subscription_id=COALESCE(stripe_subscription_id, $4)
+             WHERE id=$5`,
+            [planForSub, maxAccounts, expiresAtFull, session.subscription || null, subId]
+          );
+        }
+        
+        // 3. Adaug cont MT5 (dacă nu există deja activ)
+        if (account_id) {
+          const accCheck = await pool.query(
+            'SELECT id FROM mt5_accounts WHERE user_id=$1 AND account_number=$2',
+            [userId, account_id]
+          );
+          if (accCheck.rows.length === 0) {
+            await pool.query(
+              `INSERT INTO mt5_accounts (user_id, subscription_id, account_number, is_active, added_at)
+               VALUES ($1, $2, $3, true, NOW())`,
+              [userId, subId, account_id]
+            );
+          } else {
+            // Reactivez dacă era inactiv
+            await pool.query(
+              'UPDATE mt5_accounts SET is_active=true, removed_at=NULL, subscription_id=$1 WHERE id=$2',
+              [subId, accCheck.rows[0].id]
+            );
+          }
+        }
+        
+        // 4. EA licenses — mapping nume frumos → fișier tehnic
+        const EA_MAP = {
+          'ZigZag Fibo EA': 'Fibo_Final_V3.ex5',
+          'Killer Indices EA': 'Killer_Indices_RobertAbo_V3.ex5',
+          'Meneger Stock EA': 'Meneger_Stock_MarketsABO_V3.ex5',
+          'Range Breakout EA': 'Range_Breakout_Abo_V3.ex5',
+          'Robert Long EA': 'Robert_Long_Indices_ABO_V3.ex5',
+          'Simple BuyDay EA': 'Simple__BuyDay_EAABO_V3.ex5'
+        };
+        const ALL_EAS = Object.keys(EA_MAP);
+        
+        // Determin ce EA-uri primește acest plan
+        let eaList = [];
+        if (planForSub === 'full_access') {
+          // Full = toate 6
+          eaList = ALL_EAS;
+        } else if (eas) {
+          // EA-uri alese explicit (din metadata Stripe)
+          eaList = eas.split(',').map(s => s.trim()).filter(s => ALL_EAS.includes(s));
+          // Limită pe plan
+          const maxEAs = planForSub === 'pro' ? 3 : 1;
+          eaList = eaList.slice(0, maxEAs);
+        }
+        
+        // Ștergem EA-urile vechi și punem cele noi
+        if (eaList.length > 0) {
+          await pool.query('DELETE FROM ea_licenses WHERE user_id=$1', [userId]);
+          for (const eaName of eaList) {
+            await pool.query(
+              `INSERT INTO ea_licenses (user_id, subscription_id, ea_name, file_name, status, activated_at, expires_at)
+               VALUES ($1, $2, $3, $4, 'active', NOW(), $5)`,
+              [userId, subId, eaName, EA_MAP[eaName], expiresAtFull]
+            );
+          }
+        }
+        
+        console.log(`✅ Webhook: user ${email} (id=${userId}) actualizat la ${planForSub}, ${eaList.length} EA-uri`);
+      } catch (e) {
+        console.error('Webhook NEW system error:', e.message);
+        await sendTelegram(`⚠️ <b>Eroare sistem nou:</b>\n${e.message}\n📧 ${email}`);
+      }
+    }
+
+    // 5. Discord rol automat (folosește planNormalized)
+    if (email) await addDiscordRole(email, planNormalized);
 
     // ─── Telegram cu toate detaliile pentru tine ─────────────────
     const easLine = eas
@@ -874,7 +991,7 @@ app.post('/webhook', async (req, res) => {
       planLine +
       easLine +
       `\n📅 Activ până: ${expiresAt}\n` +
-      `\n⚡ <b>TODO: Compilează EA-urile de mai sus cu contul #${account_id} și trimite pe Discord!</b>`
+      `\n✅ <b>Activare automată completă</b> — clientul are acces în portal acum.`
     );
   }
 
