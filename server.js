@@ -275,6 +275,30 @@ async function addDiscordRole(email, plan) {
     if (!member) { console.log(`Discord: user ${dRow.discord_user_id} nu e pe server`); return false; }
     
     const roleId = getRoleIdForPlan(plan);
+
+    // 🆕 FIX: La schimbare de plan (upgrade/downgrade), scoate ÎNTÂI toate rolurile vechi
+    // ca să nu se acumuleze (ex: Basic + Pro). Excepție: OWNER protejat.
+    // 🆕 În același timp detectez planul vechi ca să trimit mesaj DM corect (schimbare vs prima dată)
+    let oldPlanName = null;
+    const PLAN_NAMES_BY_ROLE = {
+      [DISCORD_ROLES.basic]: 'BASIC',
+      [DISCORD_ROLES.pro]:   'PRO',
+      [DISCORD_ROLES.full]:  'FULL ACCESS'
+    };
+    if (dRow.discord_user_id !== DISCORD_OWNER_ID) {
+      for (const oldRoleId of Object.values(DISCORD_ROLES)) {
+        if (oldRoleId !== roleId && member.roles.cache.has(oldRoleId)) {
+          if (!oldPlanName) oldPlanName = PLAN_NAMES_BY_ROLE[oldRoleId] || null;
+          await member.roles.remove(oldRoleId).catch(e => console.log('remove old role err:', e.message));
+          console.log(`🧹 Discord: rol vechi șters (${oldRoleId}) pentru ${email}`);
+          await pool.query(
+            'INSERT INTO discord_events (user_id, discord_user_id, event_type, role_name, details) VALUES ((SELECT id FROM users WHERE email=$1), $2, $3, $4, $5)',
+            [email, dRow.discord_user_id, 'role_removed', oldRoleId, `Schimbare plan → ${plan}`]
+          );
+        }
+      }
+    }
+
     await member.roles.add(roleId);
     console.log(`✅ Discord: rol ${plan} adăugat pentru ${email} (${dRow.discord_user_id})`);
     
@@ -284,14 +308,24 @@ async function addDiscordRole(email, plan) {
       [email, dRow.discord_user_id, 'role_added', plan, `Plan ${plan} activat`]
     );
     
-    // DM bun venit
+    // 🆕 DM diferit: upgrade/downgrade (avea rol vechi) vs prima conectare
+    const newPlanName = (plan || '').toUpperCase().replace('FULL_ACCESS', 'FULL ACCESS');
+    let dmText;
+    let dmType;
+    if (oldPlanName && oldPlanName !== newPlanName) {
+      dmText = `🔄 **Planul tău a fost schimbat!**\nDe la **${oldPlanName}** la **${newPlanName}**.\nBun venit la noul nivel — acces actualizat instant. 🚀`;
+      dmType = 'Plan change DM';
+    } else {
+      dmText = `🎉 Bine ai venit! Rolul **${newPlanName}** a fost activat pe contul tău EA Strategies. Acces VIP deschis! 💎`;
+      dmType = 'Welcome DM';
+    }
     try {
-      await member.send(`🎉 Bine ai venit! Rolul **${plan.toUpperCase()}** a fost activat pe contul tău EA Strategies. Acces VIP deschis! 💎`);
+      await member.send(dmText);
       await pool.query(
         'INSERT INTO discord_events (user_id, discord_user_id, event_type, details) VALUES ((SELECT id FROM users WHERE email=$1), $2, $3, $4)',
-        [email, dRow.discord_user_id, 'dm_sent', 'Welcome DM']
+        [email, dRow.discord_user_id, 'dm_sent', dmType]
       );
-    } catch (e) { console.log('DM bun venit eșuat (user are DM închise):', e.message); }
+    } catch (e) { console.log('DM eșuat (user are DM închise):', e.message); }
     
     return true;
   } catch(e) {
