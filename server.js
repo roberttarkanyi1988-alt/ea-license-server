@@ -1139,7 +1139,13 @@ app.post('/webhook', async (req, res) => {
 
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object;
-    const { account_id, months, email, plan, eas } = session.metadata;
+    const { account_id, months, plan, eas } = session.metadata;
+    // 🆕 FIX: Email-ul vine din Stripe customer_details (după plată) sau metadata sau customer_email
+    // Stripe garantează că customer_details.email există DUPĂ plată reușită
+    const email = session.customer_details?.email 
+                || session.customer_email 
+                || session.metadata.email 
+                || null;
     const planNormalized = (plan || 'basic').toLowerCase();
     const monthsInt = parseInt(months) || 1;
     const base = new Date();
