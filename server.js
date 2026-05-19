@@ -586,6 +586,35 @@ app.get('/api/check', async (req, res) => {
         return res.send(buildResponse('SUSPENDED'));
       }
 
+      // 🆕 FIX SECURITATE: Verifică dacă acest cont e ÎN LIMITA planului
+      // Caz: client face downgrade Pro→Basic. Avea 2 conturi, acum permise 1.
+      // Doar PRIMELE N conturi (în ordinea adăugării) sunt valide; restul → INVALID
+      try {
+        const maxAccountsQuery = await pool.query(
+          'SELECT max_mt5_accounts FROM subscriptions WHERE id=$1 LIMIT 1',
+          [r.subscription_id]
+        );
+        const maxAccounts = maxAccountsQuery.rows[0]?.max_mt5_accounts || 1;
+        
+        const accountRankQuery = await pool.query(`
+          SELECT account_number, ROW_NUMBER() OVER (ORDER BY added_at ASC) AS rank
+          FROM mt5_accounts
+          WHERE user_id=$1 AND is_active=true
+        `, [r.user_id]);
+        
+        const currentRank = accountRankQuery.rows.find(row => row.account_number === account)?.rank;
+        
+        if (currentRank && parseInt(currentRank) > maxAccounts) {
+          await logAccess(account, ip, 'OVER_LIMIT');
+          await logAccessV2(r.user_id, account, req.query.ea || null, ip, 'OVER_LIMIT', true, true);
+          console.log(`🚫 Cont ${account} peste limita planului (rank ${currentRank}, max ${maxAccounts}) pentru ${r.email}`);
+          return res.send(buildResponse('INVALID'));
+        }
+      } catch (e) {
+        console.error('Limit check error:', e.message);
+        // Pe orice eroare lăsăm să treacă (failsafe — nu blocăm clientul din greșeala mea)
+      }
+
       // 🆕 SESIUNEA 10: Verificare per EA — userul are licență pentru acest EA specific?
       if (req.query.ea) {
         const eaCheck = await pool.query(
@@ -682,6 +711,137 @@ app.post('/api/customer-portal', async (req, res) => {
     res.json({ url: session.url });
   } catch (e) {
     console.error('Customer portal error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// 🆕 SESIUNEA 18: Endpoint preview schimbare plan
+// Returnează info pentru fiecare plan: limită, conflict, conturi active
+app.get('/api/plan-change-preview', async (req, res) => {
+  const { email } = req.query;
+  if (!email) return res.status(400).json({ error: 'email required' });
+
+  try {
+    // Caut user-ul
+    const userQ = await pool.query(
+      `SELECT u.id, s.plan AS current_plan, s.max_mt5_accounts AS current_max
+       FROM users u
+       LEFT JOIN subscriptions s ON s.user_id = u.id
+       WHERE u.email = $1 LIMIT 1`,
+      [email]
+    );
+    if (userQ.rows.length === 0) return res.status(404).json({ error: 'user not found' });
+    const user = userQ.rows[0];
+
+    // Conturile active ale userului (în ordinea adăugării)
+    const accountsQ = await pool.query(
+      `SELECT account_number, added_at
+       FROM mt5_accounts
+       WHERE user_id = $1 AND is_active = true
+       ORDER BY added_at ASC`,
+      [user.id]
+    );
+    const activeAccounts = accountsQ.rows.map(r => ({
+      number: r.account_number,
+      added_at: r.added_at
+    }));
+    const totalActive = activeAccounts.length;
+
+    // Pentru fiecare plan, calculează dacă există conflict
+    const planLimits = { basic: 1, pro: 2, full_access: 3 };
+    const plans = {};
+    for (const [planName, maxAcc] of Object.entries(planLimits)) {
+      plans[planName] = {
+        max: maxAcc,
+        needs_choice: totalActive > maxAcc,
+        to_remove: Math.max(0, totalActive - maxAcc)
+      };
+    }
+
+    res.json({
+      active_accounts: activeAccounts,
+      current_plan: user.current_plan,
+      current_max_accounts: user.current_max,
+      plans: plans
+    });
+  } catch (e) {
+    console.error('plan-change-preview error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// 🆕 SESIUNEA 18: Endpoint salvare alegere conturi + deschidere Stripe Portal
+// Clientul a ales conturile pe care vrea să le păstreze; salvăm temporar (30 min)
+// Apoi la webhook customer.subscription.updated vom citi această alegere
+app.post('/api/save-plan-choice', async (req, res) => {
+  const { email, target_plan, accounts_to_keep } = req.body;
+  if (!email || !target_plan || !Array.isArray(accounts_to_keep)) {
+    return res.status(400).json({ error: 'email, target_plan, accounts_to_keep required' });
+  }
+
+  // Validez target_plan
+  const validPlans = ['basic', 'pro', 'full_access'];
+  if (!validPlans.includes(target_plan)) {
+    return res.status(400).json({ error: 'Invalid target_plan' });
+  }
+
+  // Validez limita
+  const planLimits = { basic: 1, pro: 2, full_access: 3 };
+  if (accounts_to_keep.length > planLimits[target_plan]) {
+    return res.status(400).json({ error: `Planul ${target_plan} permite max ${planLimits[target_plan]} conturi` });
+  }
+
+  try {
+    // Găsesc user-ul
+    const userQ = await pool.query(
+      'SELECT id, stripe_customer_id FROM users WHERE email = $1 LIMIT 1',
+      [email]
+    );
+    if (userQ.rows.length === 0) return res.status(404).json({ error: 'user not found' });
+    const user = userQ.rows[0];
+
+    // Verific că toate conturile alese sunt active și ale userului
+    const ownedAccountsQ = await pool.query(
+      `SELECT account_number FROM mt5_accounts 
+       WHERE user_id = $1 AND is_active = true AND account_number = ANY($2::text[])`,
+      [user.id, accounts_to_keep]
+    );
+    if (ownedAccountsQ.rows.length !== accounts_to_keep.length) {
+      return res.status(400).json({ error: 'Unele conturi alese nu sunt valide' });
+    }
+
+    // Șterg orice pending change vechi pentru acest user (curățare)
+    await pool.query('DELETE FROM pending_plan_changes WHERE user_id = $1', [user.id]);
+
+    // Salvez noua alegere
+    await pool.query(
+      `INSERT INTO pending_plan_changes (user_id, target_plan, accounts_to_keep)
+       VALUES ($1, $2, $3)`,
+      [user.id, target_plan, accounts_to_keep]
+    );
+
+    // Găsesc/creez stripe_customer_id
+    let customerId = user.stripe_customer_id;
+    if (!customerId) {
+      const customers = await stripe.customers.list({ email, limit: 1 });
+      if (customers.data.length > 0) {
+        customerId = customers.data[0].id;
+        await pool.query('UPDATE users SET stripe_customer_id=$1 WHERE id=$2', [customerId, user.id]);
+      } else {
+        return res.status(404).json({ error: 'No Stripe customer found' });
+      }
+    }
+
+    // Creez sesiune Stripe Customer Portal
+    const session = await stripe.billingPortal.sessions.create({
+      customer: customerId,
+      return_url: 'https://ea-license-server-lrsl.onrender.com/client'
+    });
+
+    console.log(`✅ Plan choice saved for ${email}: ${target_plan} keep ${accounts_to_keep.join(',')}`);
+    res.json({ success: true, stripe_portal_url: session.url });
+  } catch (e) {
+    console.error('save-plan-choice error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -1384,6 +1544,65 @@ app.post('/webhook', async (req, res) => {
          WHERE user_id=$5`,
         [newPlan, maxAccounts, newStatus, periodEnd.toISOString(), user.id]
       );
+
+      // 🆕 SESIUNEA 18: Verifică dacă există alegerea clientului în pending_plan_changes
+      // Dacă DA → respectă alegerea (păstrează doar conturile alese de client)
+      // Dacă NU → fallback la comportamentul automat (cele mai vechi rămân)
+      try {
+        const activeAccountsQuery = await pool.query(
+          `SELECT id, account_number FROM mt5_accounts 
+           WHERE user_id=$1 AND is_active=true 
+           ORDER BY added_at ASC`,
+          [user.id]
+        );
+        const activeAccounts = activeAccountsQuery.rows;
+        
+        if (activeAccounts.length > maxAccounts) {
+          // Caut alegerea clientului (nu expirată)
+          const pendingQ = await pool.query(
+            `SELECT accounts_to_keep FROM pending_plan_changes 
+             WHERE user_id=$1 AND target_plan=$2 AND expires_at > NOW()
+             ORDER BY created_at DESC LIMIT 1`,
+            [user.id, newPlan]
+          );
+          
+          let accountsToKeep = [];
+          let choiceSource = '';
+          
+          if (pendingQ.rows.length > 0) {
+            // CLIENTUL A ALES — respectă alegerea lui
+            accountsToKeep = pendingQ.rows[0].accounts_to_keep || [];
+            choiceSource = 'alegerea clientului';
+          } else {
+            // FALLBACK — păstrează cele mai vechi N
+            accountsToKeep = activeAccounts.slice(0, maxAccounts).map(a => a.account_number);
+            choiceSource = 'cele mai vechi (auto)';
+          }
+          
+          // Dezactivez conturile care NU sunt în lista de păstrat
+          const toDeactivate = activeAccounts.filter(a => !accountsToKeep.includes(a.account_number));
+          for (const acc of toDeactivate) {
+            await pool.query(
+              `UPDATE mt5_accounts SET is_active=false, removed_at=NOW() WHERE id=$1`,
+              [acc.id]
+            );
+            console.log(`🚫 Dezactivat cont MT5 ${acc.account_number} pentru ${user.email} (downgrade la ${newPlan}, sursă: ${choiceSource})`);
+          }
+          
+          if (toDeactivate.length > 0) {
+            await sendTelegram(
+              `⚠️ <b>Dezactivare conturi la downgrade</b>\n📧 ${user.email}\n📦 Plan nou: ${newPlan} (max ${maxAccounts} conturi)\n✅ Păstrate: ${accountsToKeep.map(n => '#' + n).join(', ')}\n🚫 Dezactivate: ${toDeactivate.map(a => '#' + a.account_number).join(', ')}\nℹ️ Sursă alegere: ${choiceSource}`
+            );
+          }
+          
+          // Cleanup pending_plan_changes după ce am aplicat alegerea
+          if (pendingQ.rows.length > 0) {
+            await pool.query('DELETE FROM pending_plan_changes WHERE user_id=$1', [user.id]);
+          }
+        }
+      } catch (e) {
+        console.error('Plan change accounts handling error:', e.message);
+      }
       
       // 🆕 Update și tabela licenses (sistem vechi folosit de admin panel)
       const legacyPlan = newPlan === 'full_access' ? 'full' : newPlan;
