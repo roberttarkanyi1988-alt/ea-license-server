@@ -587,10 +587,13 @@ async function loadUserDataFromSupabase(authUser){
     maxAccounts: subRow ? subRow.max_mt5_accounts : 1,
     accounts: (mtRows || []).map(m => m.account_number),
     licenses: (licRows || []).map(l => buildLicenseView(l, subRow)),
+    // 🔧 FIX SESIUNEA 19: trimitem date BRUTE (nu pre-formatate) ca să nu se dubleze
     invoices: (invRows || []).map(i => ({
-      date: formatMonthYear(i.paid_at || i.created_at),
-      plan: subRow ? ('Plan ' + capitalize(subRow.plan)) : 'Abonament',
-      amount: formatMoney(i.amount_cents, i.currency)
+      raw_date: i.paid_at || i.created_at,
+      raw_plan: subRow ? subRow.plan : null,
+      amount_cents: i.amount_cents,
+      currency: i.currency,
+      pdf_url: i.invoice_pdf_url
     }))
   };
 }
@@ -735,6 +738,12 @@ async function saveMyEAs(){
   finally { btn.disabled = false; btn.textContent = t('ea-save'); }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// 🔧 FIX SESIUNEA 19: renderInvoices REPARAT
+// Funcția detectează singură formatul datelor și NU mai dublează "Plan"/"€".
+// Acceptă 2 surse: (A) date brute din loadUserDataFromSupabase {raw_date, raw_plan, amount_cents...}
+//                  (B) date din endpoint /api/my-invoices {paid_at, plan, amount, pdf_url...}
+// ═══════════════════════════════════════════════════════════════════════════
 function renderInvoices(invoices){
   const invEl = document.getElementById('invEl');
   invEl.innerHTML = '';
@@ -742,15 +751,56 @@ function renderInvoices(invoices){
     invEl.innerHTML = `<div style="text-align:center;color:var(--muted);font-size:13px;padding:12px 0;">${t('no-invoices')}</div>`;
     return;
   }
+
   invoices.forEach(inv=>{
-    const planLabel = inv.plan ? ('Plan ' + (inv.plan.charAt(0).toUpperCase() + inv.plan.slice(1)).replace('_', ' ')) : 'Abonament';
-    const amountFmt = `€${inv.amount}`;
-    const dateFmt = inv.paid_at 
-      ? new Date(inv.paid_at).toLocaleDateString(lang === 'de' ? 'de-DE' : (lang === 'en' ? 'en-GB' : 'ro-RO'), {day:'2-digit', month:'short', year:'numeric'})
-      : new Date(inv.created_at).toLocaleDateString(lang === 'de' ? 'de-DE' : (lang === 'en' ? 'en-GB' : 'ro-RO'), {day:'2-digit', month:'short', year:'numeric'});
-    const pdfButton = inv.pdf_url
-      ? `<a href="${inv.pdf_url}" target="_blank" rel="noopener" class="inv-btn" style="text-decoration:none;display:inline-block;">📄 ${t('inv-pdf')}</a>`
-      : `<span style="font-size:11px;color:var(--muted);font-style:italic;">PDF indisponibil</span>`;
+    // ── DATA — încearcă mai multe surse, fără "Invalid Date" ──────────────
+    let dateFmt = '—';
+    const dateSource = inv.raw_date || inv.paid_at || inv.created_at || inv.date || null;
+    if(dateSource){
+      const d = new Date(dateSource);
+      if(!isNaN(d.getTime())){
+        dateFmt = d.toLocaleDateString(
+          lang === 'de' ? 'de-DE' : (lang === 'en' ? 'en-GB' : 'ro-RO'),
+          {day:'2-digit', month:'short', year:'numeric'}
+        );
+      } else {
+        // dacă e deja text formatat (ex "Mai 2026"), îl afișăm așa cum e
+        dateFmt = String(dateSource);
+      }
+    }
+
+    // ── PLAN — un singur "Plan", indiferent de sursă ──────────────────────
+    let planRaw = inv.raw_plan || inv.plan || '';
+    planRaw = String(planRaw).trim();
+    // scot un eventual "Plan " deja prezent (ca să nu se dubleze)
+    planRaw = planRaw.replace(/^Plan\s+/i, '');
+    planRaw = planRaw.replace(/_/g, ' ');
+    let planLabel;
+    if(planRaw){
+      planLabel = 'Plan ' + planRaw.charAt(0).toUpperCase() + planRaw.slice(1);
+    } else {
+      planLabel = 'Abonament';
+    }
+
+    // ── SUMĂ — un singur "€", indiferent de sursă ─────────────────────────
+    let amountFmt;
+    if(typeof inv.amount_cents === 'number'){
+      amountFmt = formatMoney(inv.amount_cents, inv.currency);
+    } else if(inv.amount != null){
+      // inv.amount poate veni deja cu € sau fără
+      let a = String(inv.amount).trim();
+      a = a.replace(/^€+/, '');           // scot € din față dacă există
+      amountFmt = '€' + a;
+    } else {
+      amountFmt = '—';
+    }
+
+    // ── PDF ───────────────────────────────────────────────────────────────
+    const pdfUrl = inv.pdf_url || inv.invoice_pdf_url || null;
+    const pdfButton = pdfUrl
+      ? `<a href="${pdfUrl}" target="_blank" rel="noopener" class="inv-btn" style="text-decoration:none;display:inline-block;">📄 ${t('inv-pdf')}</a>`
+      : `<span style="font-size:11px;color:var(--muted);font-style:italic;">PDF —</span>`;
+
     invEl.innerHTML += `
       <div class="inv-row">
         <div><div class="inv-date">${dateFmt}</div><div class="inv-plan">${planLabel}</div></div>
