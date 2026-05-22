@@ -42,6 +42,14 @@ nav{position:fixed;top:0;left:0;right:0;z-index:200;background:rgba(10,12,15,0.9
 .btn-secondary{padding:14px 32px;background:transparent;color:var(--text);border:1px solid var(--border);border-radius:8px;font-family:var(--sans);font-size:14px;font-weight:600;cursor:pointer;text-decoration:none;transition:all .2s;}
 .btn-secondary:hover{border-color:var(--accent);color:var(--accent);}
 
+/* 🆕 VIDEO PREZENTARE */
+.video-section{max-width:840px;margin:0 auto;padding:0 24px 70px;text-align:center;}
+.video-tag{font-family:var(--mono);font-size:15px;color:var(--accent);letter-spacing:.12em;text-transform:uppercase;display:block;margin-bottom:14px;}
+.video-heading{font-size:clamp(20px,2.6vw,28px);font-weight:600;margin-bottom:22px;}
+.video-btn{display:inline-flex;align-items:center;gap:10px;background:var(--accent);color:#000;font-family:var(--sans);font-size:15px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;padding:15px 34px;border-radius:10px;text-decoration:none;transition:all .2s;}
+.video-btn:hover{background:#00ffb3;transform:translateY(-2px);box-shadow:0 8px 30px rgba(0,229,160,.25);}
+.video-btn-play{font-size:18px;line-height:1;}
+
 .stats-strip{display:flex;justify-content:center;border-top:1px solid var(--border);border-bottom:1px solid var(--border);background:var(--surface);}
 .stat-item{flex:1;max-width:220px;padding:24px 32px;text-align:center;border-right:1px solid var(--border);}
 .stat-item:last-child{border-right:none;}
@@ -181,6 +189,16 @@ footer a{color:var(--accent);text-decoration:none;}
     <a href="#pricing" class="btn-primary" data-t="hc1">Vezi planurile</a>
     <a href="#cum-functioneaza" class="btn-secondary" data-t="hc2">Cum funcționează</a>
   </div>
+</div>
+
+<!-- 🆕 VIDEO PREZENTARE -->
+<div class="video-section">
+  <span class="video-tag" data-t="vid-tag">Prezentare</span>
+  <h2 class="video-heading" data-t="vid-title">Vezi cum funcționează platforma</h2>
+  <a href="https://www.youtube.com/watch?v=IT-2PpEpxBo" target="_blank" rel="noopener" class="video-btn">
+    <span class="video-btn-play">▶</span>
+    <span data-t="vid-btn">Vezi prezentarea</span>
+  </a>
 </div>
 
 <div class="stats-strip">
@@ -368,6 +386,7 @@ const T={
     'ht1':'Trading automatizat','ht2':'la nivel profesional',
     'hs':'Strategii algoritmice MT5 testate, activare instantă după plată, reînnoire automată. Fără complicații.',
     'hc1':'Vezi planurile','hc2':'Cum funcționează',
+    'vid-tag':'Prezentare','vid-title':'Vezi cum funcționează platforma','vid-btn':'Vezi prezentarea',
     's1':'Strategii active','s2':'Rulează non-stop','s3':'Automatizat','s4':'Activare după plată',
     'ea-tag':'Strategiile disponibile','ea-title':'6 EA-uri testate și stabile',
     'ea-sub':'Fiecare strategie e optimizată pentru perechea ei specifică și rulează 24/7 pe VPS dedicat.',
@@ -418,6 +437,7 @@ const T={
     'ht1':'Automated trading','ht2':'at a professional level',
     'hs':'Tested MT5 algorithmic strategies, instant activation after payment, automatic renewal. No complications.',
     'hc1':'View plans','hc2':'How it works',
+    'vid-tag':'Presentation','vid-title':'See how the platform works','vid-btn':'Watch presentation',
     's1':'Active strategies','s2':'Runs non-stop','s3':'Automated','s4':'Instant activation',
     'ea-tag':'Available strategies','ea-title':'6 tested and stable EAs',
     'ea-sub':'Each strategy is optimized for its specific pair and runs 24/7 on a dedicated VPS.',
@@ -468,6 +488,7 @@ const T={
     'ht1':'Automatisiertes Trading','ht2':'auf professionellem Niveau',
     'hs':'Getestete MT5-Strategien, sofortige Aktivierung nach Zahlung, automatische Verlängerung.',
     'hc1':'Pläne ansehen','hc2':'Wie es funktioniert',
+    'vid-tag':'Präsentation','vid-title':'Sehen Sie, wie die Plattform funktioniert','vid-btn':'Präsentation ansehen',
     's1':'Aktive Strategien','s2':'Läuft rund um die Uhr','s3':'Automatisiert','s4':'Sofortige Aktivierung',
     'ea-tag':'Verfügbare Strategien','ea-title':'6 getestete und stabile EAs',
     'ea-sub':'Jede Strategie ist für ihr Paar optimiert und läuft 24/7 auf einem dedizierten VPS.',
