@@ -1536,7 +1536,7 @@ app.post('/webhook', async (req, res) => {
         console.log('⚠️ period_end lipsește, folosesc default +30 zile');
       }
       
-      const newStatus = sub.cancel_at_period_end ? 'cancelling' : 'active';
+      const newStatus = 'active';
       
       // Update subscription în DB (sistem nou)
       await pool.query(
