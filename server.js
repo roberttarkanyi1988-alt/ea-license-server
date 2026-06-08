@@ -513,6 +513,22 @@ function adminAuth(req, res, next) {
   next();
 }
 
+// 🆕 Rezolvare alias nume EA — pentru cazuri când .ex5 raportează un nume diferit de cel din ea_licenses
+// Backwards compatible: dacă nu există alias, returnează numele original
+async function resolveEaName(eaName) {
+  if (!eaName) return eaName;
+  try {
+    const r = await pool.query(
+      'SELECT canonical_name FROM ea_name_aliases WHERE alias_name = $1 LIMIT 1',
+      [eaName]
+    );
+    return r.rows.length > 0 ? r.rows[0].canonical_name : eaName;
+  } catch (e) {
+    console.error('resolveEaName error (folosesc numele original):', e.message);
+    return eaName;
+  }
+}
+
 // ─── Verificare licență (cu HMAC + Timestamp + Multi-source) ──────────────────
 // 🆕 SESIUNEA 4: Caută întâi în tabelele NOI (mt5_accounts + subscriptions),
 //               apoi fallback la tabela veche `licenses` pentru backwards compat
@@ -617,9 +633,10 @@ app.get('/api/check', async (req, res) => {
 
       // 🆕 SESIUNEA 10: Verificare per EA — userul are licență pentru acest EA specific?
       if (req.query.ea) {
+        const canonicalEaName = await resolveEaName(req.query.ea);
         const eaCheck = await pool.query(
           `SELECT id FROM ea_licenses WHERE user_id=$1 AND ea_name=$2 AND status='active' LIMIT 1`,
-          [r.user_id, req.query.ea]
+          [r.user_id, canonicalEaName]
         );
         if (eaCheck.rows.length === 0) {
           await logAccess(account, ip, 'EA_NOT_LICENSED');
