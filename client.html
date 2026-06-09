@@ -52,6 +52,19 @@ nav{position:fixed;top:0;left:0;right:0;z-index:200;background:rgba(10,12,15,0.9
 @keyframes spin{to{transform:rotate(360deg);}}
 .loading-text{font-family:var(--mono);font-size:13px;color:var(--muted);}
 
+/* 🆕 CLAIM SUBSCRIPTION */
+.claim-gate{display:flex;align-items:center;justify-content:center;min-height:80vh;}
+.claim-box{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:40px;width:100%;max-width:460px;}
+.claim-icon{font-size:36px;text-align:center;margin-bottom:12px;}
+.claim-title{font-size:20px;font-weight:600;margin-bottom:8px;text-align:center;}
+.claim-sub{font-size:13px;color:var(--muted);margin-bottom:20px;text-align:center;line-height:1.5;}
+.claim-current{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:18px;font-family:var(--mono);font-size:12px;}
+.claim-current-lbl{color:var(--muted);font-size:10px;letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px;}
+.claim-current-val{color:var(--accent);font-weight:600;word-break:break-all;}
+.claim-info{background:rgba(0,102,255,0.08);border:1px solid rgba(0,102,255,0.2);border-radius:8px;padding:12px 14px;margin-bottom:18px;font-size:12px;color:#7fa8ff;line-height:1.5;}
+.claim-btn-secondary{display:block;text-align:center;margin-top:14px;font-size:12px;color:var(--muted);text-decoration:underline;cursor:pointer;background:none;border:none;width:100%;font-family:var(--sans);}
+.claim-btn-secondary:hover{color:var(--accent);}
+
 /* PORTAL */
 .welcome{display:flex;align-items:center;gap:14px;margin-bottom:32px;padding-bottom:24px;border-bottom:1px solid var(--border);}
 .avatar{width:46px;height:46px;border-radius:50%;background:rgba(0,229,160,.15);border:1px solid rgba(0,229,160,.3);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:700;color:var(--accent);flex-shrink:0;}
@@ -227,6 +240,28 @@ nav{position:fixed;top:0;left:0;right:0;z-index:200;background:rgba(10,12,15,0.9
     </div>
   </div>
 
+  <!-- 🆕 CLAIM SUBSCRIPTION -->
+  <div id="viewClaim" class="claim-gate" style="display:none">
+    <div class="claim-box">
+      <div class="claim-icon">🔗</div>
+      <div class="claim-title" data-t="cl-title">Conectează abonamentul tău</div>
+      <div class="claim-sub" data-t="cl-sub">Pare să fie prima ta vizită cu acest cont Google. Dacă ai plătit cu alt email, conectează abonamentul aici.</div>
+      <div class="claim-current">
+        <div class="claim-current-lbl" data-t="cl-current">Logat cu</div>
+        <div class="claim-current-val" id="claimCurrentEmail">—</div>
+      </div>
+      <div class="claim-info" data-t="cl-info">💡 Introdu email-ul cu care ai plătit pe Stripe. Vom asocia abonamentul cu acest cont Google.</div>
+      <div class="form-group">
+        <label class="form-label" data-t="cl-lbl">Email Stripe (cel cu care ai plătit)</label>
+        <input class="form-input" type="email" id="claimStripeEmail" placeholder="email@exemplu.com" onkeydown="if(event.key==='Enter')submitClaim()">
+      </div>
+      <div class="form-err" id="claimErr"></div>
+      <div class="form-ok" id="claimOk"></div>
+      <button class="form-btn" onclick="submitClaim()" data-t="cl-btn">Conectează contul</button>
+      <button class="claim-btn-secondary" onclick="doLogout()" data-t="cl-logout">Sau deconectează-te și loghează-te cu alt email Google</button>
+    </div>
+  </div>
+
   <!-- PORTAL -->
   <div id="viewPortal" style="display:none">
 
@@ -341,6 +376,9 @@ const SUPA_URL  = 'https://cxtbthwoffyeazlxzequ.supabase.co';
 const SUPA_KEY  = 'sb_publishable_mFCIzSx4s7dGbQKRhJchLQ_fv9bSu38';
 const sb = window.supabase.createClient(SUPA_URL, SUPA_KEY);
 
+// 🆕 API server pentru endpoint-uri de claim
+const API_BASE = 'https://ea-license-server-lrsl.onrender.com';
+
 // ── FALLBACK DATA (când userul e nou și n-are încă date în DB) ────────────────
 const FALLBACK = {
   plan: 'basic',
@@ -410,7 +448,22 @@ const T = {
     'pc-err-max':'Poți alege maxim {n} conturi pentru acest plan.',
     'pc-monthly':'/lună','pc-accts-allowed':'conturi MT5 permise',
     'pc-redirecting':'Te redirecționăm către Stripe...',
-    'pc-acct-added':'adăugat'
+    'pc-acct-added':'adăugat',
+    'cl-title':'Conectează abonamentul tău',
+    'cl-sub':'Pare să fie prima ta vizită cu acest cont Google. Dacă ai plătit cu alt email, conectează abonamentul aici.',
+    'cl-current':'Logat cu',
+    'cl-info':'💡 Introdu email-ul cu care ai plătit pe Stripe. Vom asocia abonamentul cu acest cont Google.',
+    'cl-lbl':'Email Stripe (cel cu care ai plătit)',
+    'cl-btn':'Conectează contul',
+    'cl-logout':'Sau deconectează-te și loghează-te cu alt email Google',
+    'cl-empty':'Introdu email-ul Stripe.',
+    'cl-same':'Email-urile sunt identice. Nu e nevoie de conectare.',
+    'cl-loading':'Se verifică...',
+    'cl-success':'Cont conectat! Reîncărcăm pagina...',
+    'cl-not-found':'Nu am găsit niciun abonament cu acest email. Verifică dacă l-ai scris corect.',
+    'cl-no-sub':'Nu există abonament activ pentru acest email.',
+    'cl-collision':'Există deja un cont cu email-ul tău Google. Contactează suportul pe Discord.',
+    'cl-error':'Eroare. Încearcă din nou sau contactează suportul pe Discord.'
   },
   en:{
     'logout':'Sign out','loading':'Loading...',
@@ -458,7 +511,22 @@ const T = {
     'pc-err-max':'You can choose maximum {n} accounts for this plan.',
     'pc-monthly':'/month','pc-accts-allowed':'MT5 accounts allowed',
     'pc-redirecting':'Redirecting to Stripe...',
-    'pc-acct-added':'added'
+    'pc-acct-added':'added',
+    'cl-title':'Connect your subscription',
+    'cl-sub':'It seems this is your first visit with this Google account. If you paid with a different email, connect your subscription here.',
+    'cl-current':'Logged in with',
+    'cl-info':'💡 Enter the email you paid with on Stripe. We will link your subscription to this Google account.',
+    'cl-lbl':'Stripe email (the one you paid with)',
+    'cl-btn':'Connect account',
+    'cl-logout':'Or sign out and log in with a different Google email',
+    'cl-empty':'Enter the Stripe email.',
+    'cl-same':'Emails are identical. No connection needed.',
+    'cl-loading':'Checking...',
+    'cl-success':'Account connected! Reloading page...',
+    'cl-not-found':'No subscription found with this email. Check if you typed it correctly.',
+    'cl-no-sub':'No active subscription for this email.',
+    'cl-collision':'An account with your Google email already exists. Contact support on Discord.',
+    'cl-error':'Error. Try again or contact support on Discord.'
   },
   de:{
     'logout':'Abmelden','loading':'Wird geladen...',
@@ -506,7 +574,22 @@ const T = {
     'pc-err-max':'Sie können maximal {n} Konten für diesen Plan wählen.',
     'pc-monthly':'/Monat','pc-accts-allowed':'MT5-Konten erlaubt',
     'pc-redirecting':'Weiterleitung zu Stripe...',
-    'pc-acct-added':'hinzugefügt'
+    'pc-acct-added':'hinzugefügt',
+    'cl-title':'Abonnement verbinden',
+    'cl-sub':'Es scheint Ihr erster Besuch mit diesem Google-Konto zu sein. Wenn Sie mit einer anderen E-Mail bezahlt haben, verbinden Sie Ihr Abonnement hier.',
+    'cl-current':'Angemeldet als',
+    'cl-info':'💡 Geben Sie die E-Mail ein, mit der Sie auf Stripe bezahlt haben. Wir verknüpfen Ihr Abonnement mit diesem Google-Konto.',
+    'cl-lbl':'Stripe-E-Mail (die Bezahl-E-Mail)',
+    'cl-btn':'Konto verbinden',
+    'cl-logout':'Oder abmelden und mit einer anderen Google-E-Mail anmelden',
+    'cl-empty':'Stripe-E-Mail eingeben.',
+    'cl-same':'E-Mails sind identisch. Keine Verbindung nötig.',
+    'cl-loading':'Prüfung...',
+    'cl-success':'Konto verbunden! Seite wird neu geladen...',
+    'cl-not-found':'Kein Abonnement mit dieser E-Mail gefunden. Bitte Schreibweise prüfen.',
+    'cl-no-sub':'Kein aktives Abonnement für diese E-Mail.',
+    'cl-collision':'Ein Konto mit Ihrer Google-E-Mail existiert bereits. Support auf Discord kontaktieren.',
+    'cl-error':'Fehler. Erneut versuchen oder Support auf Discord kontaktieren.'
   }
 };
 
@@ -534,9 +617,12 @@ function setLang(l,el){
   }
 }
 
+// 🆕 MODIFICAT: include viewClaim în lista de view-uri
 function show(v){
-  ['viewLoading','viewLogin','viewPortal'].forEach(id=>document.getElementById(id).style.display='none');
-  document.getElementById(v).style.display = v==='viewLogin' ? 'flex' : 'block';
+  ['viewLoading','viewLogin','viewPortal','viewClaim'].forEach(id=>document.getElementById(id).style.display='none');
+  const el = document.getElementById(v);
+  if (v === 'viewLogin' || v === 'viewClaim') el.style.display = 'flex';
+  else el.style.display = 'block';
 }
 
 function showForm(f){
@@ -740,9 +826,6 @@ async function saveMyEAs(){
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 🔧 FIX SESIUNEA 19: renderInvoices REPARAT
-// Funcția detectează singură formatul datelor și NU mai dublează "Plan"/"€".
-// Acceptă 2 surse: (A) date brute din loadUserDataFromSupabase {raw_date, raw_plan, amount_cents...}
-//                  (B) date din endpoint /api/my-invoices {paid_at, plan, amount, pdf_url...}
 // ═══════════════════════════════════════════════════════════════════════════
 function renderInvoices(invoices){
   const invEl = document.getElementById('invEl');
@@ -753,7 +836,6 @@ function renderInvoices(invoices){
   }
 
   invoices.forEach(inv=>{
-    // ── DATA — încearcă mai multe surse, fără "Invalid Date" ──────────────
     let dateFmt = '—';
     const dateSource = inv.raw_date || inv.paid_at || inv.created_at || inv.date || null;
     if(dateSource){
@@ -764,15 +846,12 @@ function renderInvoices(invoices){
           {day:'2-digit', month:'short', year:'numeric'}
         );
       } else {
-        // dacă e deja text formatat (ex "Mai 2026"), îl afișăm așa cum e
         dateFmt = String(dateSource);
       }
     }
 
-    // ── PLAN — un singur "Plan", indiferent de sursă ──────────────────────
     let planRaw = inv.raw_plan || inv.plan || '';
     planRaw = String(planRaw).trim();
-    // scot un eventual "Plan " deja prezent (ca să nu se dubleze)
     planRaw = planRaw.replace(/^Plan\s+/i, '');
     planRaw = planRaw.replace(/_/g, ' ');
     let planLabel;
@@ -782,20 +861,17 @@ function renderInvoices(invoices){
       planLabel = 'Abonament';
     }
 
-    // ── SUMĂ — un singur "€", indiferent de sursă ─────────────────────────
     let amountFmt;
     if(typeof inv.amount_cents === 'number'){
       amountFmt = formatMoney(inv.amount_cents, inv.currency);
     } else if(inv.amount != null){
-      // inv.amount poate veni deja cu € sau fără
       let a = String(inv.amount).trim();
-      a = a.replace(/^€+/, '');           // scot € din față dacă există
+      a = a.replace(/^€+/, '');
       amountFmt = '€' + a;
     } else {
       amountFmt = '—';
     }
 
-    // ── PDF ───────────────────────────────────────────────────────────────
     const pdfUrl = inv.pdf_url || inv.invoice_pdf_url || null;
     const pdfButton = pdfUrl
       ? `<a href="${pdfUrl}" target="_blank" rel="noopener" class="inv-btn" style="text-decoration:none;display:inline-block;">📄 ${t('inv-pdf')}</a>`
@@ -979,6 +1055,69 @@ function connectDiscord(e){
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// 🆕 CLAIM SUBSCRIPTION — leagă plata Stripe (cu alt email) la userul Google curent
+// ═══════════════════════════════════════════════════════════════════════════
+async function submitClaim(){
+  const stripeEmail = document.getElementById('claimStripeEmail').value.trim();
+  const errEl = document.getElementById('claimErr');
+  const okEl  = document.getElementById('claimOk');
+  errEl.style.display='none'; okEl.style.display='none';
+
+  if(!stripeEmail){
+    errEl.textContent = t('cl-empty');
+    errEl.style.display='block';
+    return;
+  }
+
+  if(stripeEmail.toLowerCase() === (currentEmail||'').toLowerCase()){
+    errEl.textContent = t('cl-same');
+    errEl.style.display='block';
+    return;
+  }
+
+  okEl.textContent = t('cl-loading');
+  okEl.style.display='block';
+
+  try {
+    const resp = await fetch(API_BASE + '/api/claim-subscription', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        stripe_email: stripeEmail,
+        current_email: currentEmail
+      })
+    });
+
+    const data = await resp.json();
+
+    if(resp.ok && data.success){
+      okEl.textContent = t('cl-success');
+      okEl.style.display='block';
+      setTimeout(()=>{ window.location.reload(); }, 1800);
+      return;
+    }
+
+    okEl.style.display='none';
+    if(resp.status === 404){
+      errEl.textContent = t('cl-not-found');
+    } else if(resp.status === 403){
+      errEl.textContent = t('cl-no-sub');
+    } else if(resp.status === 409){
+      errEl.textContent = t('cl-collision');
+    } else {
+      errEl.textContent = data.error || t('cl-error');
+    }
+    errEl.style.display='block';
+
+  } catch(e) {
+    okEl.style.display='none';
+    errEl.textContent = t('cl-error');
+    errEl.style.display='block';
+    console.error('Claim error:', e);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // 🆕 SESIUNEA 18: PLAN CHANGE MODAL CU ALEGERE CONTURI
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -1137,10 +1276,6 @@ function closePlanChangeModal(e){
   pcPreview = null;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// END SESIUNEA 18
-// ═══════════════════════════════════════════════════════════════════════════
-
 // PDF FACTURA CLIENT (păstrat intact din varianta live)
 function generateInvoicePDF(date, plan, amount, userName, userEmail) {
   const win = window.open('', '_blank');
@@ -1170,11 +1305,26 @@ const bmap={'ro':0,'en':1,'de':2};
 if(btns[bmap[det]]) btns[bmap[det]].classList.add('active');
 applyLang(det);
 
+// 🆕 MODIFICAT: verifică portal-init pentru a decide între portal și claim
 (async()=>{
   const { data:{ session } } = await sb.auth.getSession();
   if(session && session.user){
-    const userData = await loadUserDataFromSupabase(session.user);
-    renderPortal(userData);
+    currentEmail = session.user.email;
+    try {
+      const resp = await fetch(API_BASE + '/api/portal-init?email=' + encodeURIComponent(session.user.email));
+      const data = await resp.json();
+      if(data.exists){
+        const userData = await loadUserDataFromSupabase(session.user);
+        renderPortal(userData);
+      } else {
+        document.getElementById('claimCurrentEmail').textContent = session.user.email;
+        show('viewClaim');
+      }
+    } catch(e) {
+      console.error('Portal init error:', e);
+      const userData = await loadUserDataFromSupabase(session.user);
+      renderPortal(userData);
+    }
   } else {
     show('viewLogin'); showForm('login');
   }
