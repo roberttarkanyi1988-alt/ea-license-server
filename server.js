@@ -1348,6 +1348,48 @@ app.get('/auth/discord/callback', async (req, res) => {
       </body></html>`);
     }
 
+    // 🆕 AUTO-JOIN: dacă userul nu e pe server, îl adăugăm automat folosind guilds.join
+    let autoJoinMsg = '';
+    try {
+      if (discordClient.isReady()) {
+        const guild = await discordClient.guilds.fetch(DISCORD_GUILD_ID);
+        const existingMember = await guild.members.fetch(discordUserId).catch(() => null);
+
+        if (!existingMember) {
+          console.log(`🔗 Auto-join: ${discordUsername} (${discordUserId}) nu e pe server, îl adaug...`);
+          const joinRes = await fetch(`https://discord.com/api/guilds/${DISCORD_GUILD_ID}/members/${discordUserId}`, {
+            method: 'PUT',
+            headers: {
+              'Authorization': `Bot ${process.env.DISCORD_BOT_TOKEN}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ access_token: tokenData.access_token })
+          });
+
+          if (joinRes.status === 201) {
+            console.log(`✅ Auto-join: ${discordUsername} adăugat pe server`);
+            autoJoinMsg = `<p style="color:#00e5a0;font-size:14px;">🎉 Ai fost adăugat automat pe serverul Discord!</p>`;
+            await sendTelegram(`🔗 <b>Auto-join Discord:</b>\n📧 ${portalEmail}\n💬 ${discordUsername}`);
+            // Log în discord_events
+            await pool.query(
+              'INSERT INTO discord_events (user_id, discord_user_id, event_type, details) VALUES ($1, $2, $3, $4)',
+              [upd.rows[0].id, discordUserId, 'auto_joined', 'Adăugat automat prin OAuth guilds.join']
+            ).catch(e => console.error('Log auto_join error:', e.message));
+          } else if (joinRes.status === 204) {
+            console.log(`ℹ Auto-join: ${discordUsername} deja pe server`);
+          } else {
+            const joinErr = await joinRes.text();
+            console.error(`❌ Auto-join failed: HTTP ${joinRes.status} - ${joinErr}`);
+          }
+        } else {
+          console.log(`ℹ Auto-join: ${discordUsername} deja pe server, sar peste`);
+        }
+      }
+    } catch (joinErr) {
+      console.error('Auto-join exception:', joinErr.message);
+      // Nu blocăm flow-ul — rolul se va încerca oricum
+    }
+
     // 🆕 SESIUNEA 14: Auto-verificare abonament activ → dă rolul automat
     let autoRoleMsg = '';
     try {
@@ -1372,6 +1414,7 @@ app.get('/auth/discord/callback', async (req, res) => {
     res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:50px;background:#0a0c0f;color:#e8eaf0;">
       <h1 style="color:#00e5a0;">✅ Discord conectat!</h1>
       <p>Contul Discord <b>${discordUsername}</b> a fost conectat la <b>${portalEmail}</b></p>
+      ${autoJoinMsg}
       ${autoRoleMsg}
       <a href="/client" style="color:#00e5a0;">Înapoi la portal →</a>
       <script>setTimeout(() => window.location.href='/client', 3500);</script>
