@@ -732,6 +732,124 @@ app.post('/api/customer-portal', async (req, res) => {
   }
 });
 
+// 🆕 PORTAL INIT — verifică dacă userul (după email-ul Google) există în DB
+// Folosit pe portal la login pentru a decide între: arată portal sau arată "Claim subscription"
+app.get('/api/portal-init', async (req, res) => {
+  const { email } = req.query;
+  if (!email) return res.status(400).json({ error: 'email required' });
+
+  try {
+    const r = await pool.query(
+      `SELECT u.id, u.email, u.discord_user_id, s.plan, s.status
+       FROM users u
+       LEFT JOIN subscriptions s ON s.user_id = u.id
+       WHERE u.email = $1 LIMIT 1`,
+      [email]
+    );
+
+    if (r.rows.length === 0) {
+      return res.json({ exists: false });
+    }
+
+    const user = r.rows[0];
+    return res.json({
+      exists: true,
+      user_id: user.id,
+      email: user.email,
+      plan: user.plan || null,
+      subscription_status: user.status || null,
+      discord_connected: !!user.discord_user_id
+    });
+  } catch (e) {
+    console.error('portal-init error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// 🆕 CLAIM SUBSCRIPTION — leagă o plată Stripe (făcută cu alt email) la userul logat cu Google
+// Caz tipic: client a plătit cu yahoo, apoi se loghează cu Google care are alt email
+app.post('/api/claim-subscription', async (req, res) => {
+  const { stripe_email, current_email } = req.body;
+  if (!stripe_email || !current_email) {
+    return res.status(400).json({ error: 'stripe_email și current_email sunt obligatorii' });
+  }
+
+  // Normalizare (Stripe păstrează email-urile cu majuscule cum a scris clientul)
+  const stripeEmailNorm = stripe_email.trim().toLowerCase();
+  const currentEmailNorm = current_email.trim().toLowerCase();
+
+  if (stripeEmailNorm === currentEmailNorm) {
+    return res.status(400).json({ error: 'Cele două email-uri sunt identice — nu e nevoie de claim' });
+  }
+
+  try {
+    // 1. Verific dacă cumva există deja user cu email-ul curent (Google)
+    //    Dacă da, ar fi o coliziune (2 conturi pentru același Google email)
+    const existingCheck = await pool.query(
+      'SELECT id FROM users WHERE LOWER(email) = $1 LIMIT 1',
+      [currentEmailNorm]
+    );
+    if (existingCheck.rows.length > 0) {
+      return res.status(409).json({ 
+        error: 'Există deja un cont cu acest email Google. Contactează suportul.',
+        contact: 'discord'
+      });
+    }
+
+    // 2. Caut user-ul cu email-ul Stripe + subscription activ
+    const userQuery = await pool.query(
+      `SELECT u.id, u.email, s.status, s.plan
+       FROM users u
+       LEFT JOIN subscriptions s ON s.user_id = u.id
+       WHERE LOWER(u.email) = $1 LIMIT 1`,
+      [stripeEmailNorm]
+    );
+
+    if (userQuery.rows.length === 0) {
+      return res.status(404).json({ 
+        error: 'Nu am găsit niciun cont cu acest email Stripe. Verifică dacă ai scris corect.'
+      });
+    }
+
+    const user = userQuery.rows[0];
+
+    // 3. Verific că are subscription activ sau în grace period
+    if (!user.status || (user.status !== 'active' && user.status !== 'grace_period')) {
+      return res.status(403).json({
+        error: 'Nu există un abonament activ pentru acest email. Status: ' + (user.status || 'fără abonament')
+      });
+    }
+
+    // 4. Actualizez email-ul user-ului la cel curent (Google)
+    await pool.query(
+      'UPDATE users SET email = $1 WHERE id = $2',
+      [current_email.trim(), user.id]
+    );
+
+    console.log(`✅ Claim subscription: user_id ${user.id} - email schimbat din ${stripeEmailNorm} în ${currentEmailNorm}`);
+
+    // 5. Telegram notification
+    await sendTelegram(
+      `🔗 <b>Claim Subscription</b>\n` +
+      `📧 Email vechi (Stripe): ${stripeEmailNorm}\n` +
+      `📧 Email nou (Google): ${currentEmailNorm}\n` +
+      `📦 Plan: ${user.plan}\n` +
+      `✅ Cont conectat cu succes`
+    );
+
+    res.json({
+      success: true,
+      message: 'Cont conectat cu succes! Reîncarcă pagina ca să accesezi portalul.',
+      user_id: user.id,
+      plan: user.plan
+    });
+
+  } catch (e) {
+    console.error('claim-subscription error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // 🆕 SESIUNEA 18: Endpoint preview schimbare plan
 // Returnează info pentru fiecare plan: limită, conflict, conturi active
 app.get('/api/plan-change-preview', async (req, res) => {
