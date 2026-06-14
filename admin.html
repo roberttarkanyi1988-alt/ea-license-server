@@ -111,6 +111,55 @@ tr:hover td{background:rgba(255,255,255,.02);}
 .modal-title{font-size:16px;font-weight:600;margin-bottom:4px;}
 .modal-sub{font-size:12px;color:var(--muted);margin-bottom:16px;}
 
+/* ─── 🆕 ACTIVITATE LIVE TAB ────────────────────────────────────── */
+.activity-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px;}
+.activity-title-block h2{font-size:16px;font-weight:600;}
+.activity-title-block p{font-size:12px;color:var(--muted);margin-top:4px;}
+.section-label{font-size:10px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;font-weight:700;margin-bottom:8px;margin-top:20px;}
+.section-label:first-child{margin-top:0;}
+
+.live-metric{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;border-left:3px solid var(--accent);}
+.live-metric.amber{border-left-color:var(--warn);}
+.live-metric.red{border-left-color:var(--danger);}
+.live-metric.blue{border-left-color:var(--accent2);}
+.live-metric.purple{border-left-color:#7F77DD;}
+.live-metric-lbl{font-size:11px;color:var(--muted);margin-bottom:6px;}
+.live-metric-val{font-size:24px;font-weight:600;font-family:var(--mono);}
+.live-metric-sub{font-size:11px;color:var(--muted);margin-top:2px;}
+
+.notif-list{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:20px;}
+.notif-item{display:flex;align-items:flex-start;gap:10px;padding:10px;border-radius:8px;margin-bottom:8px;}
+.notif-item:last-child{margin-bottom:0;}
+.notif-item.warning{background:rgba(255,184,0,.08);border-left:3px solid var(--warn);}
+.notif-item.info{background:rgba(0,102,255,.08);border-left:3px solid var(--accent2);}
+.notif-item.success{background:rgba(0,229,160,.08);border-left:3px solid var(--accent);}
+.notif-emoji{font-size:18px;}
+.notif-content{flex:1;}
+.notif-title{font-size:13px;font-weight:600;color:var(--text);}
+.notif-sub{font-size:11px;color:var(--muted);margin-top:2px;}
+
+.client-row{display:flex;align-items:center;gap:12px;padding:10px;border-radius:8px;cursor:pointer;margin-bottom:6px;transition:all .2s;border:1px solid transparent;}
+.client-row:hover{background:rgba(255,255,255,.03);}
+.client-row.selected{background:rgba(0,229,160,.06);border-color:var(--accent);}
+.client-avatar{width:36px;height:36px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;color:#000;font-weight:700;font-size:13px;font-family:var(--mono);}
+.client-info{flex:1;min-width:0;}
+.client-name{font-size:13px;font-weight:600;color:var(--text);}
+.client-meta{font-size:11px;color:var(--muted);margin-top:2px;}
+
+.ea-bar-row{margin-bottom:12px;}
+.ea-bar-row:last-child{margin-bottom:0;}
+.ea-bar-header{display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;}
+.ea-bar-name{font-weight:600;color:var(--text);}
+.ea-bar-count{color:var(--muted);font-family:var(--mono);font-size:11px;}
+.ea-bar-track{height:6px;background:var(--surface);border-radius:3px;overflow:hidden;}
+.ea-bar-fill{height:100%;background:var(--accent);transition:width .3s;}
+
+.activity-bars{display:flex;align-items:flex-end;justify-content:space-between;height:80px;gap:6px;margin-bottom:8px;}
+.day-bar-wrap{flex:1;display:flex;flex-direction:column;align-items:center;}
+.day-bar{width:100%;background:var(--accent2);border-radius:3px 3px 0 0;min-height:2px;transition:height .3s;}
+.day-bar.empty{background:var(--surface);}
+.day-bar-lbl{font-size:10px;color:var(--muted);margin-top:4px;font-family:var(--mono);}
+
 @media(max-width:768px){nav{padding:0 16px;}.main{padding:72px 16px 40px;}.two-col{grid-template-columns:1fr;}.metrics-grid{grid-template-columns:1fr 1fr;}}
 </style>
 </head>
@@ -146,6 +195,7 @@ tr:hover td{background:rgba(255,255,255,.02);}
       <button class="tab" onclick="showTab('abuse',this)">🚨 Abuzuri</button>
       <button class="tab" onclick="showTab('add',this)">➕ Adaugă licență</button>
       <button class="tab" onclick="showTab('discord',this)">💬 Discord</button>
+      <button class="tab" onclick="showTab('activity',this)">📡 Activitate Live</button>
     </div>
 
     <!-- OVERVIEW TAB -->
@@ -308,6 +358,121 @@ tr:hover td{background:rgba(255,255,255,.02);}
       </div>
     </div>
 
+    <!-- 🆕 ACTIVITATE LIVE TAB -->
+    <div id="tab-activity" style="display:none">
+      <div class="activity-header">
+        <div class="activity-title-block">
+          <h2>📡 Monitor activitate EA-uri</h2>
+          <p id="activityLastUpdate">Se încarcă datele...</p>
+        </div>
+        <button class="btn-secondary" onclick="loadActivityMonitor()" style="padding:8px 16px;font-size:12px">↻ Actualizează</button>
+      </div>
+
+      <!-- Sumar status -->
+      <div class="section-label">📊 Sumar status clienți</div>
+      <div class="metrics-grid">
+        <div class="live-metric">
+          <div class="live-metric-lbl">🟢 Activi acum</div>
+          <div class="live-metric-val" id="actActive">—</div>
+          <div class="live-metric-sub">ultimele 2 ore</div>
+        </div>
+        <div class="live-metric amber">
+          <div class="live-metric-lbl">🟡 Inactivi</div>
+          <div class="live-metric-val" id="actInactive">—</div>
+          <div class="live-metric-sub">24-48h fără check-in</div>
+        </div>
+        <div class="live-metric red">
+          <div class="live-metric-lbl">🛡️ Erori azi</div>
+          <div class="live-metric-val" id="actErrors">—</div>
+          <div class="live-metric-sub">ultimele 24h</div>
+        </div>
+        <div class="live-metric blue">
+          <div class="live-metric-lbl">📊 Total clienți</div>
+          <div class="live-metric-val" id="actTotal">—</div>
+          <div class="live-metric-sub">cu abonament activ</div>
+        </div>
+      </div>
+
+      <!-- Distribuție planuri -->
+      <div class="section-label">💰 Distribuție planuri</div>
+      <div class="chart-card">
+        <div id="planDistribution">
+          <div style="font-size:13px;color:var(--muted);">Se încarcă...</div>
+        </div>
+      </div>
+
+      <!-- Notificări -->
+      <div class="section-label">🔔 Notificări importante</div>
+      <div class="notif-list" id="notifList">
+        <div style="font-size:13px;color:var(--muted);text-align:center;padding:8px">Se încarcă...</div>
+      </div>
+
+      <!-- Lista clienți -->
+      <div class="section-label">👥 Clienți activi</div>
+      <div class="chart-card" id="clientsActivityList">
+        <div style="font-size:13px;color:var(--muted);text-align:center;padding:8px">Se încarcă...</div>
+      </div>
+
+      <!-- Top EA-uri + Activitate săptămânală -->
+      <div class="two-col" style="margin-top:8px">
+        <div class="chart-card">
+          <div class="chart-title">🏆 Top EA-uri (7 zile)</div>
+          <div id="topEasList">
+            <div style="font-size:13px;color:var(--muted);">Se încarcă...</div>
+          </div>
+        </div>
+
+        <div class="chart-card">
+          <div class="chart-title">📈 Activitate săptămânală</div>
+          <div id="weeklyChart">
+            <div style="font-size:13px;color:var(--muted);">Se încarcă...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Conturi MT5 active -->
+      <div class="section-label">🗺️ Conturi MT5 active</div>
+      <div class="table-card">
+        <div style="overflow-x:auto">
+          <table>
+            <thead>
+              <tr>
+                <th>Email Client</th>
+                <th>Cont MT5</th>
+                <th>Broker</th>
+                <th>Plan</th>
+                <th>Adăugat</th>
+              </tr>
+            </thead>
+            <tbody id="mt5AccountsTable">
+              <tr><td colspan="5" style="text-align:center;color:var(--muted);padding:24px">Se încarcă...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Ultimele check-in-uri -->
+      <div class="section-label">📋 Ultimele check-in-uri</div>
+      <div class="table-card">
+        <div style="overflow-x:auto">
+          <table>
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>EA</th>
+                <th>Cont MT5</th>
+                <th>Status</th>
+                <th>Când</th>
+              </tr>
+            </thead>
+            <tbody id="recentCheckinsTable">
+              <tr><td colspan="5" style="text-align:center;color:var(--muted);padding:24px">Se încarcă...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -355,11 +520,12 @@ function showDashboard(){
 function showTab(id, el){
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');
-  ['overview','clients','abuse','add','discord'].forEach(t=>{
+  ['overview','clients','abuse','add','discord','activity'].forEach(t=>{
     document.getElementById('tab-'+t).style.display = t===id ? 'block' : 'none';
   });
   if(id==='clients') loadClients();
   if(id==='abuse') loadAbuse();
+  if(id==='activity') loadActivityMonitor();
 }
 
 async function loadAll(){
@@ -779,6 +945,282 @@ function showErr(id, msg){
   const el = document.getElementById(id);
   el.textContent = msg;
   el.style.display = 'block';
+}
+
+// ─── 🆕 ACTIVITATE LIVE — Monitor dashboard ──────────────────────────
+async function loadActivityMonitor(){
+  try {
+    document.getElementById('activityLastUpdate').textContent = 'Se încarcă...';
+    const r = await fetch(SERVER+'/admin/activity-monitor', { headers:{ 'x-admin-key': ADMIN_KEY } });
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const data = await r.json();
+    renderActivitySummary(data.summary, data.financial);
+    renderActivityNotifs(data);
+    renderActivityClients(data.clients);
+    renderActivityTopEas(data.top_eas);
+    renderActivityWeekly(data.weekly_activity);
+    renderActivityMt5(data.mt5_accounts);
+    renderActivityRecentCheckins(data.recent_checkins);
+    renderPlanDistribution(data.financial);
+    const updTime = new Date(data.generated_at).toLocaleTimeString('ro-RO');
+    document.getElementById('activityLastUpdate').textContent = `Actualizat la ${updTime} • ${data.recent_checkins.length} check-ins recente`;
+  } catch(e){
+    console.error('Activity monitor error:', e);
+    document.getElementById('activityLastUpdate').textContent = '❌ Eroare la încărcare: '+e.message;
+  }
+}
+
+function renderActivitySummary(summary, financial){
+  document.getElementById('actActive').textContent = summary.active_now || 0;
+  document.getElementById('actInactive').textContent = summary.inactive_24_48h || 0;
+  document.getElementById('actErrors').textContent = summary.errors_today || 0;
+  document.getElementById('actTotal').textContent = financial.total_active || 0;
+}
+
+function renderPlanDistribution(financial){
+  const total = parseInt(financial.total_active) || 0;
+  const basic = parseInt(financial.basic_count) || 0;
+  const pro = parseInt(financial.pro_count) || 0;
+  const full = parseInt(financial.full_count) || 0;
+  const box = document.getElementById('planDistribution');
+  
+  if(total === 0){
+    box.innerHTML = '<div style="font-size:13px;color:var(--muted);text-align:center;padding:12px">Niciun client activ</div>';
+    return;
+  }
+  
+  const makeBar = (name, count, color, price) => {
+    const pct = total > 0 ? Math.round((count/total)*100) : 0;
+    const revenue = count * price;
+    return `<div class="ea-bar-row">
+      <div class="ea-bar-header">
+        <span class="ea-bar-name">${name} <span style="color:var(--muted);font-weight:400">(€${price}/lună)</span></span>
+        <span class="ea-bar-count">${count} client${count!==1?'i':''} (${pct}%) • €${revenue}</span>
+      </div>
+      <div class="ea-bar-track"><div class="ea-bar-fill" style="width:${pct}%;background:${color}"></div></div>
+    </div>`;
+  };
+  
+  box.innerHTML = makeBar('Basic', basic, '#B5D4F4', 25) +
+                  makeBar('Pro', pro, 'var(--accent2)', 45) +
+                  makeBar('Full Access', full, 'var(--accent)', 70);
+}
+
+function renderActivityNotifs(data){
+  const notifs = [];
+  
+  // Clienți inactivi 24-48h
+  if(data.summary.inactive_24_48h > 0){
+    notifs.push({
+      type: 'warning',
+      emoji: '⚠️',
+      title: `${data.summary.inactive_24_48h} client${data.summary.inactive_24_48h>1?'i':''} ${data.summary.inactive_24_48h>1?'au':'nu'} mai făcut check-in de 24h`,
+      sub: 'Vezi lista clienților de mai jos și contactează-i dacă e nevoie'
+    });
+  }
+  
+  // Erori în ultimele 24h
+  if(data.summary.errors_today > 0){
+    notifs.push({
+      type: 'warning',
+      emoji: '🚨',
+      title: `${data.summary.errors_today} erori în ultimele 24h`,
+      sub: 'Vezi tabelul "Ultimele check-in-uri" pentru detalii'
+    });
+  }
+  
+  // Subscriptions expiring soon
+  const expSoon = parseInt(data.financial.expiring_soon) || 0;
+  if(expSoon > 0){
+    notifs.push({
+      type: 'warning',
+      emoji: '⏳',
+      title: `${expSoon} abonament${expSoon>1?'e':''} expiră în următoarele 7 zile`,
+      sub: 'Verifică în tab-ul Overview pentru detalii reînnoiri'
+    });
+  }
+  
+  // Security OK
+  const totalCheckins = data.recent_checkins.length;
+  if(totalCheckins > 0 && data.summary.errors_today === 0){
+    notifs.push({
+      type: 'success',
+      emoji: '✅',
+      title: 'Sistem securitate OK',
+      sub: `${totalCheckins} check-in-uri recente, toate HMAC valide`
+    });
+  }
+  
+  // Dacă nu există notificări speciale
+  if(notifs.length === 0){
+    notifs.push({
+      type: 'success',
+      emoji: '✅',
+      title: 'Totul funcționează normal',
+      sub: 'Niciun client cu probleme, niciun avertisment activ'
+    });
+  }
+  
+  document.getElementById('notifList').innerHTML = notifs.map(n => 
+    `<div class="notif-item ${n.type}">
+      <div class="notif-emoji">${n.emoji}</div>
+      <div class="notif-content">
+        <div class="notif-title">${n.title}</div>
+        <div class="notif-sub">${n.sub}</div>
+      </div>
+    </div>`
+  ).join('');
+}
+
+function renderActivityClients(clients){
+  const box = document.getElementById('clientsActivityList');
+  
+  if(!clients || !clients.length){
+    box.innerHTML = '<div style="font-size:13px;color:var(--muted);text-align:center;padding:12px">Niciun client cu abonament activ</div>';
+    return;
+  }
+  
+  const now = new Date();
+  box.innerHTML = clients.map(c => {
+    const initials = (c.email||'??').substring(0,2).toUpperCase();
+    const lastCheckin = c.last_checkin ? new Date(c.last_checkin) : null;
+    
+    let statusPill, statusText, lastText;
+    if(lastCheckin){
+      const hoursAgo = (now - lastCheckin) / (1000*60*60);
+      if(hoursAgo < 2){
+        statusPill = 'pill-green';
+        statusText = '🟢 Activ';
+        lastText = `Activ acum ${Math.round(hoursAgo*60)} min`;
+      } else if(hoursAgo < 24){
+        statusPill = 'pill-green';
+        statusText = '🟢 Activ';
+        lastText = `Acum ${Math.round(hoursAgo)}h`;
+      } else if(hoursAgo < 120){
+        statusPill = 'pill-amber';
+        statusText = '🟡 Inactiv';
+        lastText = `Acum ${Math.round(hoursAgo/24)} zile`;
+      } else {
+        statusPill = 'pill-red';
+        statusText = '🔴 Dispărut';
+        lastText = `Acum ${Math.round(hoursAgo/24)} zile`;
+      }
+    } else {
+      statusPill = 'pill-amber';
+      statusText = '⏳ Niciun check-in';
+      lastText = 'N-a rulat încă EA-uri';
+    }
+    
+    return `<div class="client-row">
+      <div class="client-avatar">${initials}</div>
+      <div class="client-info">
+        <div class="client-name">${c.email||'(fără email)'}</div>
+        <div class="client-meta">${(c.plan||'?').toUpperCase()} • ${c.active_eas_count||0} EA-uri • ${c.active_accounts_count||0} conturi MT5 • ${lastText}</div>
+      </div>
+      <span class="pill ${statusPill}">${statusText}</span>
+    </div>`;
+  }).join('');
+}
+
+function renderActivityTopEas(topEas){
+  const box = document.getElementById('topEasList');
+  if(!topEas || !topEas.length){
+    box.innerHTML = '<div style="font-size:13px;color:var(--muted);text-align:center;padding:12px">Niciun check-in în ultimele 7 zile</div>';
+    return;
+  }
+  
+  const maxCount = Math.max(...topEas.map(e => parseInt(e.checkins_count)));
+  box.innerHTML = topEas.map(ea => {
+    const count = parseInt(ea.checkins_count);
+    const pct = maxCount > 0 ? (count/maxCount)*100 : 0;
+    return `<div class="ea-bar-row">
+      <div class="ea-bar-header">
+        <span class="ea-bar-name">${ea.ea_name}</span>
+        <span class="ea-bar-count">${count} check-ins</span>
+      </div>
+      <div class="ea-bar-track"><div class="ea-bar-fill" style="width:${pct}%"></div></div>
+    </div>`;
+  }).join('');
+}
+
+function renderActivityWeekly(weekly){
+  const box = document.getElementById('weeklyChart');
+  
+  // Generez ultimele 7 zile (chiar dacă nu au date)
+  const days = [];
+  const today = new Date();
+  for(let i=6; i>=0; i--){
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const dayName = ['Du','Lu','Ma','Mi','Jo','Vi','Sâ'][d.getDay()];
+    const dateStr = d.toISOString().split('T')[0];
+    const found = weekly && weekly.find(w => {
+      const wDate = new Date(w.day).toISOString().split('T')[0];
+      return wDate === dateStr;
+    });
+    days.push({ label: dayName, count: found ? parseInt(found.checkins) : 0 });
+  }
+  
+  const maxCount = Math.max(...days.map(d => d.count), 1);
+  const total = days.reduce((sum, d) => sum + d.count, 0);
+  
+  box.innerHTML = `
+    <div class="activity-bars">
+      ${days.map(d => {
+        const height = (d.count/maxCount)*100;
+        return `<div class="day-bar-wrap">
+          <div class="day-bar ${d.count===0?'empty':''}" style="height:${d.count===0?2:height}%" title="${d.count} check-ins"></div>
+          <div class="day-bar-lbl">${d.label}</div>
+        </div>`;
+      }).join('')}
+    </div>
+    <div style="font-size:11px;color:var(--muted);text-align:center;margin-top:8px">Total: ${total} check-ins (7 zile)</div>
+  `;
+}
+
+function renderActivityMt5(accounts){
+  const tbody = document.getElementById('mt5AccountsTable');
+  if(!accounts || !accounts.length){
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:24px">Niciun cont MT5 activ</td></tr>';
+    return;
+  }
+  
+  tbody.innerHTML = accounts.map(a => {
+    const date = a.added_at ? new Date(a.added_at).toLocaleDateString('ro-RO') : '—';
+    return `<tr>
+      <td style="font-size:12px;color:var(--muted)">${a.email||'—'}</td>
+      <td style="font-family:var(--mono)">${a.account_number}</td>
+      <td>${a.broker || '<span style="color:var(--muted)">—</span>'}</td>
+      <td><span class="pill pill-blue">${(a.plan||'?').toUpperCase()}</span></td>
+      <td style="font-size:12px;color:var(--muted)">${date}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderActivityRecentCheckins(checkins){
+  const tbody = document.getElementById('recentCheckinsTable');
+  if(!checkins || !checkins.length){
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:24px">Niciun check-in recent</td></tr>';
+    return;
+  }
+  
+  const now = new Date();
+  tbody.innerHTML = checkins.map(c => {
+    const checkinTime = new Date(c.checked_at);
+    const diffMin = Math.round((now - checkinTime) / 60000);
+    let timeAgo;
+    if(diffMin < 60) timeAgo = `acum ${diffMin} min`;
+    else if(diffMin < 1440) timeAgo = `acum ${Math.round(diffMin/60)}h`;
+    else timeAgo = `acum ${Math.round(diffMin/1440)} zile`;
+    
+    return `<tr>
+      <td style="font-size:12px;color:var(--muted)">${c.email||'—'}</td>
+      <td>${c.ea_name||'—'}</td>
+      <td style="font-family:var(--mono);font-size:12px">${c.account_number||'—'}</td>
+      <td><span class="pill pill-green">✓ Valid</span></td>
+      <td style="font-size:12px;color:var(--muted)">${timeAgo}</td>
+    </tr>`;
+  }).join('');
 }
 
 // Check session
