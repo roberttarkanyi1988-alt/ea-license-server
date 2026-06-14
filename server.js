@@ -497,9 +497,73 @@ async function checkExpiringLicenses() {
   }
 }
 
+// 🆕 FAZA 3: Verificare zilnică pentru trial-uri care expiră curând
+async function checkExpiringTrials() {
+  try {
+    // Trial-uri care expiră în 3 zile sau 1 zi → notificare Telegram + DM Discord
+    const expiringTrials = await pool.query(`
+      SELECT 
+        s.id, s.user_id, s.plan, s.trial_source, s.current_period_end,
+        u.email, u.discord_user_id, u.discord_username,
+        EXTRACT(DAY FROM (s.current_period_end - NOW())) AS days_left
+      FROM subscriptions s
+      JOIN users u ON u.id = s.user_id
+      WHERE s.is_trial = true 
+        AND s.status = 'active'
+        AND s.current_period_end > NOW()
+        AND s.current_period_end::date - CURRENT_DATE IN (3, 1)
+    `);
+
+    for (const t of expiringTrials.rows) {
+      const days = Math.ceil((new Date(t.current_period_end) - new Date()) / 86400000);
+      // Telegram pentru tine
+      await sendTelegram(
+        `🎁 <b>Trial expiră în ${days} zile</b>\n` +
+        `📧 ${t.email}\n` +
+        `📦 Plan: ${t.plan} (${t.trial_source || 'unknown'})\n` +
+        `📅 Expiră: ${new Date(t.current_period_end).toISOString().split('T')[0]}`
+      );
+
+      // DM Discord pentru client (dacă are Discord conectat)
+      if (t.discord_user_id && discordClient.isReady()) {
+        try {
+          const guild = await discordClient.guilds.fetch(DISCORD_GUILD_ID);
+          const member = await guild.members.fetch(t.discord_user_id).catch(() => null);
+          if (member) {
+            await member.send(
+              `⏳ Hei! Trial-ul tău EA Strategies expiră în **${days} zile**. ` +
+              `Dacă vrei să continui după expirare, contactează-mă pentru un abonament. 🚀`
+            );
+          }
+        } catch (e) { /* DM eșuat, lăsăm */ }
+      }
+    }
+
+    // Trial-uri tocmai expirate → marchez expired + remove rol Discord
+    const justExpiredTrials = await pool.query(`
+      SELECT s.id, s.user_id, u.email
+      FROM subscriptions s
+      JOIN users u ON u.id = s.user_id
+      WHERE s.is_trial = true AND s.status = 'active' AND s.current_period_end < NOW()
+    `);
+
+    for (const t of justExpiredTrials.rows) {
+      await pool.query("UPDATE subscriptions SET status='expired' WHERE id=$1", [t.id]);
+      await pool.query("UPDATE ea_licenses SET status='expired' WHERE user_id=$1", [t.user_id]);
+      if (t.email) await removeDiscordRole(t.email, true, 'Trial expirat');
+      await sendTelegram(`❌ <b>Trial expirat:</b>\n📧 ${t.email}\n⏰ Acces blocat`);
+    }
+  } catch (e) {
+    console.error('Trial expiry check error:', e.message);
+  }
+}
+
 setInterval(() => {
   const now = new Date();
-  if (now.getHours() === 9 && now.getMinutes() === 0) checkExpiringLicenses();
+  if (now.getHours() === 9 && now.getMinutes() === 0) {
+    checkExpiringLicenses();
+    checkExpiringTrials();
+  }
 }, 60000);
 
 // ─── Rate Limiting ────────────────────────────────────────────────────────────
@@ -2198,6 +2262,404 @@ app.get('/admin/activity-monitor', adminAuth, async (req, res) => {
     });
   } catch (e) {
     console.error('Activity monitor error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── 🆕 FAZA 2: EXTINDERE ABONAMENT GRATUIT ──────────────────────────────────
+
+// Helper: Actualizează billing_cycle_anchor în Stripe cu proration_behavior='none'
+// Asta înseamnă: Stripe AMÂNĂ data următoarei facturări, FĂRĂ să genereze ajustări
+async function updateStripeBillingAnchor(stripeSubId, newPeriodEnd) {
+  if (!stripeSubId) return { synced: false, error: 'no_stripe_subscription' };
+  try {
+    const trialEndUnix = Math.floor(new Date(newPeriodEnd).getTime() / 1000);
+    // trial_end mută anchor-ul în viitor FĂRĂ proration
+    // (alternativă mai sigură decât billing_cycle_anchor direct)
+    const updated = await stripe.subscriptions.update(stripeSubId, {
+      trial_end: trialEndUnix,
+      proration_behavior: 'none'
+    });
+    console.log(`✅ Stripe billing anchor actualizat: ${stripeSubId} → ${newPeriodEnd}`);
+    return { synced: true, stripe_status: updated.status };
+  } catch (e) {
+    console.error('Stripe billing anchor error:', e.message);
+    return { synced: false, error: e.message };
+  }
+}
+
+// POST /admin/extend-subscription
+// Body: { user_id, days, reason_tag, reason_notes, sync_stripe (bool, default true) }
+app.post('/admin/extend-subscription', adminAuth, async (req, res) => {
+  const { user_id, days, reason_tag, reason_notes, sync_stripe = true } = req.body;
+
+  // Validări
+  if (!user_id || !days || !reason_tag) {
+    return res.status(400).json({ error: 'user_id, days și reason_tag sunt obligatorii' });
+  }
+  const daysInt = parseInt(days);
+  if (isNaN(daysInt) || daysInt < 1 || daysInt > 365) {
+    return res.status(400).json({ error: 'days trebuie între 1 și 365' });
+  }
+  const validTags = ['compensation', 'loyalty', 'gift', 'friend_bonus', 'apology', 'other'];
+  if (!validTags.includes(reason_tag)) {
+    return res.status(400).json({ error: 'reason_tag invalid', valid: validTags });
+  }
+
+  try {
+    // 1. Iau subscription-ul curent
+    const subQuery = await pool.query(
+      `SELECT s.*, u.email, u.discord_user_id 
+       FROM subscriptions s 
+       JOIN users u ON u.id = s.user_id 
+       WHERE s.user_id = $1 AND s.status IN ('active', 'grace_period')
+       ORDER BY s.id DESC LIMIT 1`,
+      [user_id]
+    );
+    if (subQuery.rows.length === 0) {
+      return res.status(404).json({ error: 'Nu am găsit abonament activ pentru acest user' });
+    }
+    const sub = subQuery.rows[0];
+    const oldPeriodEnd = sub.current_period_end ? new Date(sub.current_period_end) : new Date();
+    const newPeriodEnd = new Date(oldPeriodEnd);
+    newPeriodEnd.setDate(newPeriodEnd.getDate() + daysInt);
+
+    // 2. Sincronizare Stripe (dacă există subscription Stripe + sync activat)
+    let stripeSyncResult = { synced: false, error: 'sync_disabled' };
+    if (sync_stripe && sub.stripe_subscription_id && !sub.is_trial) {
+      stripeSyncResult = await updateStripeBillingAnchor(
+        sub.stripe_subscription_id,
+        newPeriodEnd.toISOString()
+      );
+    }
+
+    // 3. Actualizez DB
+    await pool.query(
+      `UPDATE subscriptions 
+       SET current_period_end = $1, status = 'active', grace_period_until = NULL 
+       WHERE id = $2`,
+      [newPeriodEnd.toISOString(), sub.id]
+    );
+
+    // 4. Actualizez ea_licenses expires_at
+    await pool.query(
+      `UPDATE ea_licenses SET expires_at = $1 WHERE user_id = $2 AND status IN ('active', 'expired')`,
+      [newPeriodEnd.toISOString(), user_id]
+    );
+
+    // 5. Update și tabela veche licenses (backwards compat)
+    if (sub.email) {
+      const legacyDate = newPeriodEnd.toISOString().split('T')[0];
+      await pool.query(
+        `UPDATE licenses SET expires_at = $1, status = 'active' WHERE email = $2`,
+        [legacyDate, sub.email]
+      );
+    }
+
+    // 6. Loghez în manual_extensions
+    const extLog = await pool.query(
+      `INSERT INTO manual_extensions 
+       (user_id, subscription_id, days_added, reason_tag, reason_notes, 
+        old_period_end, new_period_end, stripe_synced, stripe_error) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+      [user_id, sub.id, daysInt, reason_tag, reason_notes || null,
+       oldPeriodEnd.toISOString(), newPeriodEnd.toISOString(),
+       stripeSyncResult.synced, stripeSyncResult.error || null]
+    );
+
+    // 7. Telegram
+    const reasonLabels = {
+      compensation: 'Compensare', loyalty: 'Loialitate', gift: 'Cadou',
+      friend_bonus: 'Prieten/Bonus', apology: 'Scuze', other: 'Altul'
+    };
+    await sendTelegram(
+      `🎁 <b>Extindere gratuită acordată</b>\n` +
+      `📧 ${sub.email}\n` +
+      `➕ ${daysInt} zile gratis\n` +
+      `📌 Motiv: ${reasonLabels[reason_tag]}\n` +
+      `📅 Nouă expirare: ${newPeriodEnd.toISOString().split('T')[0]}\n` +
+      `💳 Stripe sync: ${stripeSyncResult.synced ? '✅ OK' : '⚠️ ' + (stripeSyncResult.error || 'eșuat')}` +
+      (reason_notes ? `\n📝 Note: ${reason_notes}` : '')
+    );
+
+    // 8. DM Discord pentru client (opțional, dacă are Discord)
+    if (sub.discord_user_id && discordClient.isReady()) {
+      try {
+        const guild = await discordClient.guilds.fetch(DISCORD_GUILD_ID);
+        const member = await guild.members.fetch(sub.discord_user_id).catch(() => null);
+        if (member) {
+          await member.send(
+            `🎁 **Surpriză!** Ai primit **${daysInt} zile gratuite** la abonamentul tău EA Strategies! ` +
+            `Noua dată de expirare: **${newPeriodEnd.toISOString().split('T')[0]}**. Mulțumim că ești cu noi! 🚀`
+          );
+        }
+      } catch (e) { /* DM eșuat */ }
+    }
+
+    res.json({
+      success: true,
+      extension_id: extLog.rows[0].id,
+      old_period_end: oldPeriodEnd.toISOString(),
+      new_period_end: newPeriodEnd.toISOString(),
+      days_added: daysInt,
+      stripe_synced: stripeSyncResult.synced,
+      stripe_error: stripeSyncResult.error || null
+    });
+  } catch (e) {
+    console.error('Extend subscription error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /admin/extensions-log
+// Returnează jurnalul complet al extinderilor (cu filtru optional ?user_id=X)
+app.get('/admin/extensions-log', adminAuth, async (req, res) => {
+  try {
+    const { user_id } = req.query;
+    let query, params;
+    if (user_id) {
+      query = `
+        SELECT me.*, u.email 
+        FROM manual_extensions me 
+        LEFT JOIN users u ON u.id = me.user_id 
+        WHERE me.user_id = $1 
+        ORDER BY me.created_at DESC LIMIT 100`;
+      params = [user_id];
+    } else {
+      query = `
+        SELECT me.*, u.email 
+        FROM manual_extensions me 
+        LEFT JOIN users u ON u.id = me.user_id 
+        ORDER BY me.created_at DESC LIMIT 100`;
+      params = [];
+    }
+    const r = await pool.query(query, params);
+    res.json(r.rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── 🆕 FAZA 3: TRIAL GRATUIT PENTRU PRIETENI ────────────────────────────────
+
+// POST /admin/create-trial
+// Body: { email, plan, days, trial_source, trial_notes, mt5_account (optional), ea_names (optional array) }
+app.post('/admin/create-trial', adminAuth, async (req, res) => {
+  const { 
+    email, plan, days, trial_source, trial_notes, 
+    mt5_account, ea_names 
+  } = req.body;
+
+  // Validări
+  if (!email || !plan || !days || !trial_source) {
+    return res.status(400).json({ 
+      error: 'email, plan, days și trial_source sunt obligatorii' 
+    });
+  }
+  const daysInt = parseInt(days);
+  if (isNaN(daysInt) || daysInt < 1 || daysInt > 365) {
+    return res.status(400).json({ error: 'days trebuie între 1 și 365' });
+  }
+  const validPlans = ['basic', 'pro', 'full_access'];
+  if (!validPlans.includes(plan)) {
+    return res.status(400).json({ error: 'plan invalid', valid: validPlans });
+  }
+  const validSources = ['friend', 'influencer', 'tester', 'demo', 'other'];
+  if (!validSources.includes(trial_source)) {
+    return res.status(400).json({ error: 'trial_source invalid', valid: validSources });
+  }
+
+  const emailNorm = email.trim().toLowerCase();
+
+  try {
+    // 1. Verific dacă există deja user cu acest email
+    let userId;
+    const existingUser = await pool.query('SELECT id FROM users WHERE LOWER(email) = $1', [emailNorm]);
+    
+    if (existingUser.rows.length > 0) {
+      userId = existingUser.rows[0].id;
+      // Verific dacă are deja subscription activ
+      const existingSub = await pool.query(
+        `SELECT id, status, is_trial FROM subscriptions 
+         WHERE user_id = $1 AND status IN ('active', 'grace_period') LIMIT 1`,
+        [userId]
+      );
+      if (existingSub.rows.length > 0) {
+        return res.status(409).json({ 
+          error: 'Acest user are deja un abonament activ',
+          existing_subscription_id: existingSub.rows[0].id,
+          is_trial: existingSub.rows[0].is_trial
+        });
+      }
+    } else {
+      // Creez user nou (fără stripe_customer_id — trial e gratis)
+      const newUser = await pool.query(
+        'INSERT INTO users (email) VALUES ($1) RETURNING id',
+        [email.trim()]
+      );
+      userId = newUser.rows[0].id;
+    }
+
+    // 2. Calculez expirare trial
+    const trialEnd = new Date();
+    trialEnd.setDate(trialEnd.getDate() + daysInt);
+
+    // 3. Determin max_mt5_accounts pe baza planului
+    const maxAccountsByPlan = { basic: 1, pro: 2, full_access: 3 };
+    const maxAccounts = maxAccountsByPlan[plan];
+
+    // 4. Creez subscription cu is_trial=true
+    const subResult = await pool.query(
+      `INSERT INTO subscriptions 
+       (user_id, plan, max_mt5_accounts, status, current_period_end, 
+        is_trial, trial_source, trial_notes) 
+       VALUES ($1, $2, $3, 'active', $4, true, $5, $6) RETURNING id`,
+      [userId, plan, maxAccounts, trialEnd.toISOString(), trial_source, trial_notes || null]
+    );
+    const subId = subResult.rows[0].id;
+
+    // 5. Adaug cont MT5 (dacă e furnizat)
+    if (mt5_account) {
+      await pool.query(
+        `INSERT INTO mt5_accounts (user_id, subscription_id, account_number, is_active, added_at)
+         VALUES ($1, $2, $3, true, NOW())
+         ON CONFLICT DO NOTHING`,
+        [userId, subId, String(mt5_account)]
+      );
+    }
+
+    // 6. Creez ea_licenses
+    const EA_MAP = {
+      'ZigZag Fibo EA': 'Fibo_Final_V3.ex5',
+      'Killer Indices EA': 'Killer_Indices_RobertAbo_V3.ex5',
+      'Meneger Stock EA': 'Meneger_Stock_MarketsABO_V3.ex5',
+      'Range Breakout EA': 'Range_Breakout_Abo_V3.ex5',
+      'Robert Long EA': 'Robert_Long_Indices_ABO_V3.ex5',
+      'Simple BuyDay EA': 'Simple__BuyDay_EAABO_V3.ex5'
+    };
+    const ALL_EAS = Object.keys(EA_MAP);
+
+    let eaList = [];
+    if (plan === 'full_access') {
+      // Full = toate 6 automat
+      eaList = ALL_EAS;
+    } else if (Array.isArray(ea_names) && ea_names.length > 0) {
+      // EA-uri alese explicit
+      eaList = ea_names.filter(n => ALL_EAS.includes(n));
+      const maxEAs = plan === 'pro' ? 3 : 1;
+      eaList = eaList.slice(0, maxEAs);
+    }
+
+    for (const eaName of eaList) {
+      await pool.query(
+        `INSERT INTO ea_licenses 
+         (user_id, subscription_id, ea_name, file_name, status, activated_at, expires_at)
+         VALUES ($1, $2, $3, $4, 'active', NOW(), $5)`,
+        [userId, subId, eaName, EA_MAP[eaName], trialEnd.toISOString()]
+      );
+    }
+
+    // 7. Telegram
+    const sourceLabels = {
+      friend: 'Prieten', influencer: 'Influencer', tester: 'Tester',
+      demo: 'Demo', other: 'Altul'
+    };
+    await sendTelegram(
+      `🎁 <b>TRIAL GRATUIT CREAT</b>\n` +
+      `📧 ${email}\n` +
+      `📦 Plan: ${plan.toUpperCase()}\n` +
+      `⏱️ Durată: ${daysInt} zile\n` +
+      `📅 Expiră: ${trialEnd.toISOString().split('T')[0]}\n` +
+      `🏷️ Sursă: ${sourceLabels[trial_source]}\n` +
+      `🤖 EA-uri: ${eaList.length > 0 ? eaList.join(', ') : 'niciuna'}` +
+      (mt5_account ? `\n💼 Cont MT5: #${mt5_account}` : '') +
+      (trial_notes ? `\n📝 Note: ${trial_notes}` : '')
+    );
+
+    res.json({
+      success: true,
+      user_id: userId,
+      subscription_id: subId,
+      email: email.trim(),
+      plan: plan,
+      trial_end: trialEnd.toISOString(),
+      days: daysInt,
+      eas_assigned: eaList,
+      mt5_account: mt5_account || null
+    });
+  } catch (e) {
+    console.error('Create trial error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /admin/trial-list
+// Returnează lista trial-urilor (active + expirate, cu filtru ?status=active)
+app.get('/admin/trial-list', adminAuth, async (req, res) => {
+  try {
+    const { status } = req.query;
+    let whereClause = 's.is_trial = true';
+    const params = [];
+    if (status === 'active') {
+      whereClause += " AND s.status = 'active' AND s.current_period_end > NOW()";
+    } else if (status === 'expired') {
+      whereClause += " AND (s.status = 'expired' OR s.current_period_end < NOW())";
+    }
+    const r = await pool.query(`
+      SELECT 
+        s.id AS subscription_id,
+        s.user_id,
+        s.plan,
+        s.status,
+        s.current_period_end,
+        s.trial_source,
+        s.trial_notes,
+        s.created_at,
+        u.email,
+        u.discord_username,
+        EXTRACT(DAY FROM (s.current_period_end - NOW())) AS days_left,
+        (SELECT COUNT(*) FROM ea_licenses WHERE user_id = s.user_id AND status = 'active') AS active_eas,
+        (SELECT COUNT(*) FROM mt5_accounts WHERE user_id = s.user_id AND is_active = true) AS active_accounts
+      FROM subscriptions s
+      JOIN users u ON u.id = s.user_id
+      WHERE ${whereClause}
+      ORDER BY s.current_period_end DESC
+    `, params);
+    res.json(r.rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /admin/trial/:id
+// Anulează un trial înainte de expirare (manual)
+app.delete('/admin/trial/:id', adminAuth, async (req, res) => {
+  try {
+    const subId = req.params.id;
+    
+    // Verific că e trial
+    const check = await pool.query(
+      `SELECT s.user_id, s.is_trial, u.email 
+       FROM subscriptions s JOIN users u ON u.id = s.user_id 
+       WHERE s.id = $1 LIMIT 1`,
+      [subId]
+    );
+    if (check.rows.length === 0) return res.status(404).json({ error: 'Subscription not found' });
+    if (!check.rows[0].is_trial) return res.status(400).json({ error: 'Acest abonament nu e trial' });
+    
+    const { user_id, email } = check.rows[0];
+
+    // Marchez ca expired (păstrez înregistrarea pentru istoric)
+    await pool.query("UPDATE subscriptions SET status='expired', current_period_end=NOW() WHERE id=$1", [subId]);
+    await pool.query("UPDATE ea_licenses SET status='expired' WHERE user_id=$1", [user_id]);
+
+    // Scot rol Discord
+    if (email) await removeDiscordRole(email, false, 'Trial anulat manual');
+
+    await sendTelegram(`🚫 <b>Trial anulat manual</b>\n📧 ${email}\n⏰ Acces blocat imediat`);
+    
+    res.json({ success: true, subscription_id: subId, user_id, email });
+  } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
