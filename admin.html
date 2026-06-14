@@ -1,2699 +1,1231 @@
-const express = require('express');
-const { Pool } = require('pg');
-const rateLimit = require('express-rate-limit');
-const path = require('path');
-const crypto = require('crypto'); // 🔐 NOU pentru HMAC
-require('dotenv').config();
-const { Client, GatewayIntentBits } = require('discord.js');
-
-const app = express();
-
-// ─── Stripe webhook needs raw body ───────────────────────────────────────────
-app.use('/webhook', express.raw({ type: 'application/json' }));
-app.use(express.json());
-
-// ─── Stripe Setup ─────────────────────────────────────────────────────────────
-const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-
-// ─── Admin Key ────────────────────────────────────────────────────────────────
-const ADMIN_KEY = process.env.ADMIN_KEY || 'schimba-aceasta-cheie-secreta';
-
-// 🔐 NOU: HMAC Setup pentru securitate EA
-const HMAC_SECRET = process.env.HMAC_SECRET || '';
-const TIMESTAMP_WINDOW_SECONDS = 60;
-
-if (!HMAC_SECRET) {
-  console.warn('⚠️  HMAC_SECRET nu e setat! Mod backwards compat activ.');
-} else {
-  console.log('✅ HMAC_SECRET încărcat — securitate maximă activă');
-}
-
-function generateHMAC(payload) {
-  if (!HMAC_SECRET) return '';
-  return crypto.createHmac('sha256', HMAC_SECRET).update(payload).digest('hex');
-}
-
-// ─── ROUTES ───────────────────────────────────────────────────────────────────
-app.get('/', (req, res) => {
-  res.redirect('/landing');
-});
-
-app.get('/landing', (req, res) => {
-  res.sendFile(path.join(__dirname, 'landing.html'));
-});
-
-app.get('/client', (req, res) => {
-  res.sendFile(path.join(__dirname, 'client.html'));
-});
-
-app.get('/admin', (req, res) => {
-  res.sendFile(path.join(__dirname, 'admin.html'));
-});
-
-app.get('/admin-panel', (req, res) => {
-  const k = req.query.key || req.headers['x-admin-key'];
-  if (!k || k !== ADMIN_KEY) return res.status(401).send('Unauthorized');
-  res.sendFile(path.join(__dirname, 'index.html'));
-});
-
-// ─── PWA Files ────────────────────────────────────────────────────────────────
-app.get('/manifest.json', (req, res) => res.sendFile(path.join(__dirname, 'manifest.json')));
-app.get('/sw.js', (req, res) => res.sendFile(path.join(__dirname, 'sw.js')));
-app.get('/icon-512.svg', (req, res) => res.sendFile(path.join(__dirname, 'icon-512.svg')));
-app.get('/icon-192.svg', (req, res) => res.sendFile(path.join(__dirname, 'icon-192.svg')));
-
-// ─── Database Setup ───────────────────────────────────────────────────────────
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }
-});
-
-async function initDB() {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS licenses (
-      id          SERIAL PRIMARY KEY,
-      account_id  TEXT NOT NULL UNIQUE,
-      email       TEXT,
-      plan        TEXT DEFAULT 'monthly',
-      status      TEXT DEFAULT 'active',
-      expires_at  TEXT NOT NULL,
-      created_at  TEXT DEFAULT to_char(now(), 'YYYY-MM-DD HH24:MI:SS'),
-      notes       TEXT
-    );
-    CREATE TABLE IF NOT EXISTS access_log (
-      id          SERIAL PRIMARY KEY,
-      account_id  TEXT,
-      ip          TEXT,
-      result      TEXT,
-      checked_at  TEXT DEFAULT to_char(now(), 'YYYY-MM-DD HH24:MI:SS')
-    );
-  `);
-  console.log('✅ Database initialized');
-}
-
-initDB().catch(console.error);
-
-// ─── Telegram ─────────────────────────────────────────────────────────────────
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const TELEGRAM_CHAT_ID   = process.env.TELEGRAM_CHAT_ID;
-
-async function sendTelegram(message) {
-  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) return;
-  try {
-    await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: TELEGRAM_CHAT_ID, text: message, parse_mode: 'HTML' })
-    });
-  } catch(e) {
-    console.error('Telegram error:', e.message);
-  }
-}
-
-// 🆕 SESIUNEA 15-FIX v2 (Opțiunea B): Sincronizare TOATE facturile lipsă pentru un customer
-// Aceasta abordare e ROBUSTĂ — nu pierdem niciodată facturi, indiferent ce eveniment Stripe primim
-async function saveInvoiceFromStripe(invoiceIdOrNull, userId, subId, userEmail, stripeCustomerId = null) {
-  try {
-    // 1. Aflu stripe_customer_id dacă nu mi-a fost dat
-    let customerId = stripeCustomerId;
-    if (!customerId && userId) {
-      const userQuery = await pool.query(
-        'SELECT stripe_customer_id FROM users WHERE id = $1 LIMIT 1',
-        [userId]
-      );
-      customerId = userQuery.rows[0]?.stripe_customer_id;
-    }
-
-    if (!customerId) {
-      console.log('saveInvoice: nu am stripe_customer_id, sar peste');
-      return false;
-    }
-
-    // 2. Cer Stripe TOATE facturile recente ale customer-ului (PLĂTITE)
-    const stripeInvoices = await stripe.invoices.list({
-      customer: customerId,
-      status: 'paid',
-      limit: 20  // ultimele 20 facturi plătite — suficient
-    });
-
-    if (!stripeInvoices.data || stripeInvoices.data.length === 0) {
-      console.log(`saveInvoice: niciun invoice plătit pentru customer ${customerId}`);
-      return false;
-    }
-
-    // 3. Verific care din ele NU sunt deja în Supabase
-    const stripeInvoiceIds = stripeInvoices.data.map(inv => inv.id);
-    const existingQuery = await pool.query(
-      'SELECT stripe_invoice_id FROM invoices WHERE stripe_invoice_id = ANY($1::text[])',
-      [stripeInvoiceIds]
-    );
-    const existingIds = new Set(existingQuery.rows.map(r => r.stripe_invoice_id));
-
-    // 4. Salvez DOAR facturile noi (cele care nu există deja)
-    let savedCount = 0;
-    for (const inv of stripeInvoices.data) {
-      if (existingIds.has(inv.id)) continue;  // Sărim peste cele deja salvate
-
-      const amount = inv.amount_paid || inv.amount_due || 0;
-      if (amount <= 0) continue;  // Sărim peste facturi cu sumă zero (proration credits)
-
-      const pdfUrl = inv.invoice_pdf || inv.hosted_invoice_url || null;
-      const status = inv.status || 'paid';
-      const paidAt = inv.status_transitions?.paid_at
-        ? new Date(inv.status_transitions.paid_at * 1000)
-        : new Date();
-
-      // Pentru fiecare factură, încerc să găsesc subscription_id corect (poate fi diferit)
-      let invSubId = subId;
-      if (inv.subscription) {
-        const subQ = await pool.query(
-          'SELECT id FROM subscriptions WHERE stripe_subscription_id = $1 LIMIT 1',
-          [inv.subscription]
-        );
-        if (subQ.rows.length > 0) invSubId = subQ.rows[0].id;
-      }
-
-      await pool.query(`
-        INSERT INTO invoices (
-          user_id, subscription_id, stripe_invoice_id,
-          amount_cents, currency, status, invoice_pdf_url, paid_at
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        ON CONFLICT (stripe_invoice_id) DO NOTHING
-      `, [
-        userId,
-        invSubId,
-        inv.id,
-        amount,
-        (inv.currency || 'eur').toLowerCase(),
-        status,
-        pdfUrl,
-        paidAt
-      ]);
-
-      savedCount++;
-      console.log(`✅ Factură nouă salvată: ${inv.id} pentru ${userEmail}, €${(amount/100).toFixed(2)}`);
-
-      // Telegram per factură nouă
-      await sendTelegram(
-        `🧾 <b>Factură nouă salvată</b>\n` +
-        `📧 ${userEmail || 'N/A'}\n` +
-        `💰 €${(amount/100).toFixed(2)}\n` +
-        `📅 ${paidAt.toISOString().split('T')[0]}\n` +
-        `📄 PDF: disponibil în portal client`
-      );
-    }
-
-    if (savedCount === 0) {
-      console.log(`ℹ️ Sync facturi pentru ${userEmail}: toate sunt deja salvate (${stripeInvoices.data.length} total)`);
-    } else {
-      console.log(`✅ Sync facturi pentru ${userEmail}: ${savedCount} facturi noi salvate`);
-    }
-
-    return true;
-  } catch (e) {
-    console.error('saveInvoiceFromStripe error:', e.message);
-    return false;
-  }
-}
-
-// ─── DISCORD BOT ──────────────────────────────────────────────────────────────
-const DISCORD_GUILD_ID = '1500420643290615918';
-const DISCORD_ROLES = {
-  basic: '1503110227438993469',
-  pro:   '1503110421740257471',
-  full:  '1503108475495125033'
-};
-
-const discordClient = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers]
-});
-
-discordClient.once('ready', () => {
-  console.log(`✅ Discord bot conectat: ${discordClient.user.tag}`);
-});
-
-if (process.env.DISCORD_BOT_TOKEN) {
-  discordClient.login(process.env.DISCORD_BOT_TOKEN).catch(err => {
-    console.error('Discord login error:', err.message);
-  });
-}
-
-// 🆕 SESIUNEA 8: Discord ID-ul OWNER-ului (Robert) — exclus de la kick/role removal
-const DISCORD_OWNER_ID = '928628118149816330';
-
-function getRoleIdForPlan(plan) {
-  if (!plan) return DISCORD_ROLES.basic;
-  const p = plan.toLowerCase();
-  if (p.includes('full')) return DISCORD_ROLES.full;
-  if (p.includes('pro'))  return DISCORD_ROLES.pro;
-  return DISCORD_ROLES.basic;
-}
-
-// 🆕 SESIUNEA 8: Funcție unificată — caută user după email, ia discord_user_id din DB
-async function getDiscordIdByEmail(email) {
-  try {
-    const r = await pool.query('SELECT discord_user_id, discord_username FROM users WHERE email=$1 LIMIT 1', [email]);
-    if (r.rows[0] && r.rows[0].discord_user_id) return r.rows[0];
-    return null;
-  } catch (e) {
-    console.error('getDiscordIdByEmail error:', e.message);
-    return null;
-  }
-}
-
-// 🆕 SESIUNEA 8: Adaugă rol folosind discord_user_id direct (mult mai sigur decât căutare după username)
-async function addDiscordRole(email, plan) {
-  try {
-    if (!discordClient.isReady()) { console.log('Discord bot nu e gata'); return false; }
-    
-    const dRow = await getDiscordIdByEmail(email);
-    if (!dRow) { console.log(`Discord: ${email} n-are discord_user_id în DB (clientul trebuie să conecteze Discord în portal)`); return false; }
-    
-    const guild = await discordClient.guilds.fetch(DISCORD_GUILD_ID);
-    const member = await guild.members.fetch(dRow.discord_user_id).catch(() => null);
-    if (!member) { console.log(`Discord: user ${dRow.discord_user_id} nu e pe server`); return false; }
-    
-    const roleId = getRoleIdForPlan(plan);
-
-    // 🆕 FIX: La schimbare de plan (upgrade/downgrade), scoate ÎNTÂI toate rolurile vechi
-    // ca să nu se acumuleze (ex: Basic + Pro). Excepție: OWNER protejat.
-    // 🆕 În același timp detectez planul vechi ca să trimit mesaj DM corect (schimbare vs prima dată)
-    let oldPlanName = null;
-    const PLAN_NAMES_BY_ROLE = {
-      [DISCORD_ROLES.basic]: 'BASIC',
-      [DISCORD_ROLES.pro]:   'PRO',
-      [DISCORD_ROLES.full]:  'FULL ACCESS'
-    };
-    if (dRow.discord_user_id !== DISCORD_OWNER_ID) {
-      for (const oldRoleId of Object.values(DISCORD_ROLES)) {
-        if (oldRoleId !== roleId && member.roles.cache.has(oldRoleId)) {
-          if (!oldPlanName) oldPlanName = PLAN_NAMES_BY_ROLE[oldRoleId] || null;
-          await member.roles.remove(oldRoleId).catch(e => console.log('remove old role err:', e.message));
-          console.log(`🧹 Discord: rol vechi șters (${oldRoleId}) pentru ${email}`);
-          await pool.query(
-            'INSERT INTO discord_events (user_id, discord_user_id, event_type, role_name, details) VALUES ((SELECT id FROM users WHERE email=$1), $2, $3, $4, $5)',
-            [email, dRow.discord_user_id, 'role_removed', oldRoleId, `Schimbare plan → ${plan}`]
-          );
-        }
-      }
-    }
-
-    await member.roles.add(roleId);
-    console.log(`✅ Discord: rol ${plan} adăugat pentru ${email} (${dRow.discord_user_id})`);
-    
-    // Log în discord_events
-    await pool.query(
-      'INSERT INTO discord_events (user_id, discord_user_id, event_type, role_name, details) VALUES ((SELECT id FROM users WHERE email=$1), $2, $3, $4, $5)',
-      [email, dRow.discord_user_id, 'role_added', plan, `Plan ${plan} activat`]
-    );
-    
-    // 🆕 DM diferit: upgrade/downgrade (avea rol vechi) vs prima conectare
-    const newPlanName = (plan || '').toUpperCase().replace('FULL_ACCESS', 'FULL ACCESS');
-    let dmText;
-    let dmType;
-    if (oldPlanName && oldPlanName !== newPlanName) {
-      dmText = `🔄 **Planul tău a fost schimbat!**\nDe la **${oldPlanName}** la **${newPlanName}**.\nBun venit la noul nivel — acces actualizat instant. 🚀`;
-      dmType = 'Plan change DM';
-    } else {
-      dmText = `🎉 Bine ai venit! Rolul **${newPlanName}** a fost activat pe contul tău EA Strategies. Acces VIP deschis! 💎`;
-      dmType = 'Welcome DM';
-    }
-    try {
-      await member.send(dmText);
-      await pool.query(
-        'INSERT INTO discord_events (user_id, discord_user_id, event_type, details) VALUES ((SELECT id FROM users WHERE email=$1), $2, $3, $4)',
-        [email, dRow.discord_user_id, 'dm_sent', dmType]
-      );
-    } catch (e) { console.log('DM eșuat (user are DM închise):', e.message); }
-    
-    return true;
-  } catch(e) {
-    console.error('Discord addRole error:', e.message);
-    return false;
-  }
-}
-
-// 🆕 SESIUNEA 8: Șterge TOATE rolurile + opțional DM de informare
-async function removeDiscordRole(email, sendDM = false, reason = '') {
-  try {
-    if (!discordClient.isReady()) return false;
-    
-    const dRow = await getDiscordIdByEmail(email);
-    if (!dRow) return false;
-    
-    // 🛡️ PROTECȚIE OWNER: nu șterge rolurile OWNER-ului niciodată
-    if (dRow.discord_user_id === DISCORD_OWNER_ID) {
-      console.log(`🛡️ Skip removeDiscordRole pentru OWNER (${email})`);
-      return false;
-    }
-    
-    const guild = await discordClient.guilds.fetch(DISCORD_GUILD_ID);
-    const member = await guild.members.fetch(dRow.discord_user_id).catch(() => null);
-    if (!member) return false;
-    
-    for (const roleId of Object.values(DISCORD_ROLES)) {
-      if (member.roles.cache.has(roleId)) await member.roles.remove(roleId);
-    }
-    console.log(`✅ Discord: roluri șterse pentru ${email}`);
-    
-    await pool.query(
-      'INSERT INTO discord_events (user_id, discord_user_id, event_type, details) VALUES ((SELECT id FROM users WHERE email=$1), $2, $3, $4)',
-      [email, dRow.discord_user_id, 'role_removed', reason || 'Abonament expirat']
-    );
-    
-    if (sendDM) {
-      try {
-        await member.send(`⚠️ Abonamentul EA Strategies a expirat. Ai **30 zile** să-l reînnoiești înainte să fii înlăturat de pe server. Reînnoiește aici: https://ea-license-server-lrsl.onrender.com/landing`);
-        await pool.query(
-          'INSERT INTO discord_events (user_id, discord_user_id, event_type, details) VALUES ((SELECT id FROM users WHERE email=$1), $2, $3, $4)',
-          [email, dRow.discord_user_id, 'dm_sent', 'Expiry warning']
-        );
-      } catch (e) { console.log('DM expiry eșuat:', e.message); }
-    }
-    
-    return true;
-  } catch(e) {
-    console.error('Discord removeRole error:', e.message);
-    return false;
-  }
-}
-
-// 🆕 SESIUNEA 8: Kick de pe server (după 30 zile grace period)
-async function kickFromDiscord(email) {
-  try {
-    if (!discordClient.isReady()) return false;
-    
-    const dRow = await getDiscordIdByEmail(email);
-    if (!dRow) return false;
-    
-    // 🛡️ PROTECȚIE OWNER: nu da NICIODATĂ kick OWNER-ului
-    if (dRow.discord_user_id === DISCORD_OWNER_ID) {
-      console.log(`🛡️ Skip kickFromDiscord pentru OWNER (${email})`);
-      return false;
-    }
-    
-    const guild = await discordClient.guilds.fetch(DISCORD_GUILD_ID);
-    const member = await guild.members.fetch(dRow.discord_user_id).catch(() => null);
-    if (!member) return false;
-    
-    // DM înainte de kick
-    try {
-      await member.send(`👋 Au trecut 30 zile de la expirarea abonamentului. Te-am scos de pe server. Te așteptăm înapoi oricând: https://ea-license-server-lrsl.onrender.com/landing`);
-    } catch (e) { /* DM închise, dă mai departe */ }
-    
-    await member.kick('Subscription expired 30+ days');
-    console.log(`✅ Discord: ${email} kicked după grace period`);
-    
-    await pool.query(
-      'INSERT INTO discord_events (user_id, discord_user_id, event_type, details) VALUES ((SELECT id FROM users WHERE email=$1), $2, $3, $4)',
-      [email, dRow.discord_user_id, 'kicked', '30 zile grace period expirate']
-    );
-    
-    return true;
-  } catch (e) {
-    console.error('Discord kick error:', e.message);
-    return false;
-  }
-}
-
-// ─── 🆕 SESIUNEA 8: Verificare zilnică (3-tier: warn, expire+grace, kick) ──────
-async function checkExpiringLicenses() {
-  try {
-    // 1. Avertismente: expiră în 7, 3, 1 zi → DOAR Telegram pentru tine
-    const expiringWarn = await pool.query(`
-      SELECT * FROM licenses 
-      WHERE status = 'active' 
-      AND expires_at::date - CURRENT_DATE IN (7, 3, 1)
-    `);
-    for (const row of expiringWarn.rows) {
-      const daysLeft = Math.ceil((new Date(row.expires_at) - new Date()) / 86400000);
-      await sendTelegram(
-        `⚠️ <b>Abonament expiră în ${daysLeft} zile!</b>\n` +
-        `👤 Cont: <b>#${row.account_id}</b>\n` +
-        `📧 Email: ${row.email || 'nespecificat'}\n` +
-        `📅 Expiră: ${row.expires_at}`
-      );
-    }
-    
-    // 2. Tocmai expirate → marchează expired, șterge rol, DM cu 30 zile grace
-    const justExpired = await pool.query(`
-      SELECT * FROM licenses WHERE status = 'active' AND expires_at::date < CURRENT_DATE
-    `);
-    for (const row of justExpired.rows) {
-      if (row.email) await removeDiscordRole(row.email, true, 'Abonament expirat — grace 30 zile');
-      await pool.query("UPDATE licenses SET status='expired' WHERE account_id=$1", [row.account_id]);
-      await sendTelegram(`❌ <b>Abonament expirat!</b>\n👤 #${row.account_id}\n📧 ${row.email || '—'}\n⏰ Grace 30 zile activ`);
-    }
-    
-    // 3. Grace period 30+ zile expirat → KICK
-    const graceExpired = await pool.query(`
-      SELECT * FROM licenses 
-      WHERE status = 'expired' 
-      AND expires_at::date < CURRENT_DATE - INTERVAL '30 days'
-      AND email IS NOT NULL
-    `);
-    for (const row of graceExpired.rows) {
-      const kicked = await kickFromDiscord(row.email);
-      if (kicked) {
-        await pool.query("UPDATE licenses SET status='kicked' WHERE account_id=$1", [row.account_id]);
-        await sendTelegram(`👋 <b>Kick Discord:</b> ${row.email} (grace 30 zile expirat)`);
-      }
-    }
-    
-    // 4. Verifică și subscriptions noi (tabela mt5_accounts)
-    const newExpired = await pool.query(`
-      SELECT s.id, s.user_id, u.email, s.current_period_end
-      FROM subscriptions s
-      JOIN users u ON u.id = s.user_id
-      WHERE s.status = 'active' AND s.current_period_end < NOW()
-    `);
-    for (const row of newExpired.rows) {
-      await removeDiscordRole(row.email, true, 'Subscription expirat — grace 30 zile');
-      await pool.query(
-        "UPDATE subscriptions SET status='grace_period', grace_period_until=NOW() + INTERVAL '30 days' WHERE id=$1",
-        [row.id]
-      );
-      await sendTelegram(`❌ <b>Subscription expirat (nou):</b>\n📧 ${row.email}\n⏰ Grace 30 zile`);
-    }
-    
-    // 5. Grace period nou expirat → KICK + status expired
-    const newKick = await pool.query(`
-      SELECT s.id, s.user_id, u.email
-      FROM subscriptions s
-      JOIN users u ON u.id = s.user_id
-      WHERE s.status = 'grace_period' AND s.grace_period_until < NOW()
-    `);
-    for (const row of newKick.rows) {
-      const kicked = await kickFromDiscord(row.email);
-      if (kicked) {
-        await pool.query("UPDATE subscriptions SET status='expired' WHERE id=$1", [row.id]);
-        await sendTelegram(`👋 <b>Kick Discord (nou):</b> ${row.email}`);
-      }
-    }
-    
-  } catch(e) {
-    console.error('Expiry check error:', e.message);
-  }
-}
-
-// 🆕 FAZA 3: Verificare zilnică pentru trial-uri care expiră curând
-async function checkExpiringTrials() {
-  try {
-    // Trial-uri care expiră în 3 zile sau 1 zi → notificare Telegram + DM Discord
-    const expiringTrials = await pool.query(`
-      SELECT 
-        s.id, s.user_id, s.plan, s.trial_source, s.current_period_end,
-        u.email, u.discord_user_id, u.discord_username,
-        EXTRACT(DAY FROM (s.current_period_end - NOW())) AS days_left
-      FROM subscriptions s
-      JOIN users u ON u.id = s.user_id
-      WHERE s.is_trial = true 
-        AND s.status = 'active'
-        AND s.current_period_end > NOW()
-        AND s.current_period_end::date - CURRENT_DATE IN (3, 1)
-    `);
-
-    for (const t of expiringTrials.rows) {
-      const days = Math.ceil((new Date(t.current_period_end) - new Date()) / 86400000);
-      // Telegram pentru tine
-      await sendTelegram(
-        `🎁 <b>Trial expiră în ${days} zile</b>\n` +
-        `📧 ${t.email}\n` +
-        `📦 Plan: ${t.plan} (${t.trial_source || 'unknown'})\n` +
-        `📅 Expiră: ${new Date(t.current_period_end).toISOString().split('T')[0]}`
-      );
-
-      // DM Discord pentru client (dacă are Discord conectat)
-      if (t.discord_user_id && discordClient.isReady()) {
-        try {
-          const guild = await discordClient.guilds.fetch(DISCORD_GUILD_ID);
-          const member = await guild.members.fetch(t.discord_user_id).catch(() => null);
-          if (member) {
-            await member.send(
-              `⏳ Hei! Trial-ul tău EA Strategies expiră în **${days} zile**. ` +
-              `Dacă vrei să continui după expirare, contactează-mă pentru un abonament. 🚀`
-            );
-          }
-        } catch (e) { /* DM eșuat, lăsăm */ }
-      }
-    }
-
-    // Trial-uri tocmai expirate → marchez expired + remove rol Discord
-    const justExpiredTrials = await pool.query(`
-      SELECT s.id, s.user_id, u.email
-      FROM subscriptions s
-      JOIN users u ON u.id = s.user_id
-      WHERE s.is_trial = true AND s.status = 'active' AND s.current_period_end < NOW()
-    `);
-
-    for (const t of justExpiredTrials.rows) {
-      await pool.query("UPDATE subscriptions SET status='expired' WHERE id=$1", [t.id]);
-      await pool.query("UPDATE ea_licenses SET status='expired' WHERE user_id=$1", [t.user_id]);
-      if (t.email) await removeDiscordRole(t.email, true, 'Trial expirat');
-      await sendTelegram(`❌ <b>Trial expirat:</b>\n📧 ${t.email}\n⏰ Acces blocat`);
-    }
-  } catch (e) {
-    console.error('Trial expiry check error:', e.message);
-  }
-}
-
-setInterval(() => {
-  const now = new Date();
-  if (now.getHours() === 9 && now.getMinutes() === 0) {
-    checkExpiringLicenses();
-    checkExpiringTrials();
-  }
-}, 60000);
-
-// ─── Rate Limiting ────────────────────────────────────────────────────────────
-const limiter = rateLimit({ windowMs: 60 * 1000, max: 30, message: 'RATE_LIMITED' });
-app.use('/api/', limiter);
-
-// ─── Admin Auth ───────────────────────────────────────────────────────────────
-function adminAuth(req, res, next) {
-  const key = req.headers['x-admin-key'];
-  if (!key || key !== ADMIN_KEY) return res.status(401).json({ error: 'Unauthorized' });
-  next();
-}
-
-// 🆕 Rezolvare alias nume EA — pentru cazuri când .ex5 raportează un nume diferit de cel din ea_licenses
-// Backwards compatible: dacă nu există alias, returnează numele original
-async function resolveEaName(eaName) {
-  if (!eaName) return eaName;
-  try {
-    const r = await pool.query(
-      'SELECT canonical_name FROM ea_name_aliases WHERE alias_name = $1 LIMIT 1',
-      [eaName]
-    );
-    return r.rows.length > 0 ? r.rows[0].canonical_name : eaName;
-  } catch (e) {
-    console.error('resolveEaName error (folosesc numele original):', e.message);
-    return eaName;
-  }
-}
-
-// ─── Verificare licență (cu HMAC + Timestamp + Multi-source) ──────────────────
-// 🆕 SESIUNEA 4: Caută întâi în tabelele NOI (mt5_accounts + subscriptions),
-//               apoi fallback la tabela veche `licenses` pentru backwards compat
-app.get('/api/check', async (req, res) => {
-  const { account, ts } = req.query;
-  const ip = req.ip;
-  if (!account) { await logAccess(null, ip, 'MISSING_ACCOUNT'); return res.status(400).send('INVALID'); }
-
-  // 🔐 Verificare timestamp pentru anti-replay
-  if (ts) {
-    const clientTime = parseInt(ts, 10);
-    const serverTime = Math.floor(Date.now() / 1000);
-    const diff = Math.abs(serverTime - clientTime);
-    if (diff > TIMESTAMP_WINDOW_SECONDS) {
-      await logAccess(account, ip, 'TIMESTAMP_INVALID');
-      await logAccessV2(null, account, null, ip, 'TIMESTAMP_INVALID', false, false);
-      return res.send('INVALID');
-    }
-  }
-
-  // Funcție helper pentru a forma răspunsul cu/fără HMAC
-  const buildResponse = (baseResponse) => {
-    if (ts && HMAC_SECRET) {
-      const serverTs = Math.floor(Date.now() / 1000);
-      const payload = `${baseResponse}|${serverTs}`;
-      const hmac = generateHMAC(payload);
-      return `${payload}|${hmac}`;
-    }
-    return baseResponse;
-  };
-
-  // 🆕 PRIORITATE 1: Caută în tabelele NOI (users + subscriptions + mt5_accounts)
-  try {
-    const newSystemQuery = await pool.query(`
-      SELECT 
-        u.id AS user_id,
-        u.email,
-        s.id AS subscription_id,
-        s.plan,
-        s.status AS sub_status,
-        s.current_period_end,
-        s.grace_period_until,
-        m.account_number,
-        m.is_active AS account_active
-      FROM mt5_accounts m
-      JOIN users u ON u.id = m.user_id
-      LEFT JOIN subscriptions s ON s.id = m.subscription_id
-      WHERE m.account_number = $1 AND m.is_active = true
-      LIMIT 1
-    `, [account]);
-
-    if (newSystemQuery.rows.length > 0) {
-      const r = newSystemQuery.rows[0];
-      const now = new Date();
-      const expiry = r.current_period_end ? new Date(r.current_period_end) : null;
-
-      // Verificări status
-      if (r.sub_status === 'cancelled') {
-        await logAccess(account, ip, 'CANCELLED');
-        await logAccessV2(r.user_id, account, req.query.ea || null, ip, 'CANCELLED', true, true);
-        return res.send(buildResponse('SUSPENDED'));
-      }
-      if (r.sub_status === 'expired' || (expiry && now > expiry)) {
-        await logAccess(account, ip, 'EXPIRED');
-        await logAccessV2(r.user_id, account, req.query.ea || null, ip, 'EXPIRED_NEW', true, true);
-        return res.send(buildResponse('EXPIRED'));
-      }
-      if (r.sub_status !== 'active' && r.sub_status !== 'grace_period') {
-        await logAccess(account, ip, 'INACTIVE');
-        await logAccessV2(r.user_id, account, req.query.ea || null, ip, 'INACTIVE', true, true);
-        return res.send(buildResponse('SUSPENDED'));
-      }
-
-      // 🆕 FIX SECURITATE: Verifică dacă acest cont e ÎN LIMITA planului
-      // Caz: client face downgrade Pro→Basic. Avea 2 conturi, acum permise 1.
-      // Doar PRIMELE N conturi (în ordinea adăugării) sunt valide; restul → INVALID
-      try {
-        const maxAccountsQuery = await pool.query(
-          'SELECT max_mt5_accounts FROM subscriptions WHERE id=$1 LIMIT 1',
-          [r.subscription_id]
-        );
-        const maxAccounts = maxAccountsQuery.rows[0]?.max_mt5_accounts || 1;
-        
-        const accountRankQuery = await pool.query(`
-          SELECT account_number, ROW_NUMBER() OVER (ORDER BY added_at ASC) AS rank
-          FROM mt5_accounts
-          WHERE user_id=$1 AND is_active=true
-        `, [r.user_id]);
-        
-        const currentRank = accountRankQuery.rows.find(row => row.account_number === account)?.rank;
-        
-        if (currentRank && parseInt(currentRank) > maxAccounts) {
-          await logAccess(account, ip, 'OVER_LIMIT');
-          await logAccessV2(r.user_id, account, req.query.ea || null, ip, 'OVER_LIMIT', true, true);
-          console.log(`🚫 Cont ${account} peste limita planului (rank ${currentRank}, max ${maxAccounts}) pentru ${r.email}`);
-          return res.send(buildResponse('INVALID'));
-        }
-      } catch (e) {
-        console.error('Limit check error:', e.message);
-        // Pe orice eroare lăsăm să treacă (failsafe — nu blocăm clientul din greșeala mea)
-      }
-
-      // 🆕 SESIUNEA 10: Verificare per EA — userul are licență pentru acest EA specific?
-      if (req.query.ea) {
-        const canonicalEaName = await resolveEaName(req.query.ea);
-        const eaCheck = await pool.query(
-          `SELECT id FROM ea_licenses WHERE user_id=$1 AND ea_name=$2 AND status='active' LIMIT 1`,
-          [r.user_id, canonicalEaName]
-        );
-        if (eaCheck.rows.length === 0) {
-          await logAccess(account, ip, 'EA_NOT_LICENSED');
-          await logAccessV2(r.user_id, account, req.query.ea, ip, 'EA_NOT_LICENSED', true, true);
-          return res.send(buildResponse('INVALID'));
-        }
-      }
-
-      // Tot OK — calculează zile rămase
-      const expiryStr = expiry ? expiry.toISOString().split('T')[0] : '2099-12-31';
-      const daysLeft = expiry ? Math.ceil((expiry - now) / (1000 * 60 * 60 * 24)) : 9999;
-      await logAccess(account, ip, 'VALID_NEW');
-      await logAccessV2(r.user_id, account, req.query.ea || null, ip, 'VALID_NEW', true, true);
-      return res.send(buildResponse(`VALID|${expiryStr}|${daysLeft}`));
-    }
-  } catch (e) {
-    console.error('New system lookup error:', e.message);
-    // Nu blocăm — încercăm fallback la tabela veche
-  }
-
-  // 🔁 PRIORITATE 2 (FALLBACK): Tabela veche `licenses` — backwards compat
-  const result = await pool.query('SELECT * FROM licenses WHERE account_id=$1', [account]);
-  const row = result.rows[0];
-
-  if (!row) { 
-    await logAccess(account, ip, 'NOT_FOUND'); 
-    await logAccessV2(null, account, null, ip, 'NOT_FOUND', true, true);
-    return res.send(buildResponse('INVALID')); 
-  }
-  if (row.status === 'suspended') { 
-    await logAccess(account, ip, 'SUSPENDED'); 
-    await logAccessV2(null, account, null, ip, 'SUSPENDED', true, true);
-    return res.send(buildResponse('SUSPENDED')); 
-  }
-
-  const now = new Date();
-  const expiry = new Date(row.expires_at);
-  if (now > expiry) {
-    await pool.query("UPDATE licenses SET status='expired' WHERE account_id=$1", [account]);
-    if (row.email) await removeDiscordRole(row.email);
-    await logAccess(account, ip, 'EXPIRED');
-    await logAccessV2(null, account, null, ip, 'EXPIRED_OLD', true, true);
-    return res.send(buildResponse('EXPIRED'));
-  }
-
-  const daysLeft = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
-  await logAccess(account, ip, 'VALID_OLD');
-  await logAccessV2(null, account, null, ip, 'VALID_OLD', true, true);
-  return res.send(buildResponse(`VALID|${row.expires_at}|${daysLeft}`));
-});
-
-// 🔐 NOU: Endpoint test pentru a verifica HMAC e activ
-app.get('/api/hmac-test', (req, res) => {
-  res.json({
-    hmac_enabled: !!HMAC_SECRET,
-    secret_length: HMAC_SECRET.length,
-    timestamp: Math.floor(Date.now() / 1000),
-    test_signature: generateHMAC('test_payload')
-  });
-});
-
-// 🆕 SESIUNEA 8: Stripe Customer Portal — clientul gestionează singur abonamentul
-app.post('/api/customer-portal', async (req, res) => {
-  const { email } = req.body;
-  if (!email) return res.status(400).json({ error: 'Email required' });
-  
-  try {
-    // Caut user-ul în DB
-    const userResult = await pool.query('SELECT stripe_customer_id FROM users WHERE email=$1 LIMIT 1', [email]);
-    let customerId = userResult.rows[0]?.stripe_customer_id;
-    
-    // Dacă nu avem stripe_customer_id salvat, îl găsim/creem
-    if (!customerId) {
-      const customers = await stripe.customers.list({ email, limit: 1 });
-      if (customers.data.length > 0) {
-        customerId = customers.data[0].id;
-        await pool.query('UPDATE users SET stripe_customer_id=$1 WHERE email=$2', [customerId, email]);
-      } else {
-        return res.status(404).json({ error: 'No subscription found for this email' });
-      }
-    }
-    
-    // Creează sesiune Customer Portal
-    const session = await stripe.billingPortal.sessions.create({
-      customer: customerId,
-      return_url: 'https://ea-license-server-lrsl.onrender.com/client'
-    });
-    
-    res.json({ url: session.url });
-  } catch (e) {
-    console.error('Customer portal error:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// 🆕 PORTAL INIT — verifică dacă userul (după email-ul Google) există în DB
-// Folosit pe portal la login pentru a decide între: arată portal sau arată "Claim subscription"
-app.get('/api/portal-init', async (req, res) => {
-  const { email } = req.query;
-  if (!email) return res.status(400).json({ error: 'email required' });
-
-  try {
-    const r = await pool.query(
-      `SELECT u.id, u.email, u.discord_user_id, s.plan, s.status
-       FROM users u
-       LEFT JOIN subscriptions s ON s.user_id = u.id
-       WHERE u.email = $1 LIMIT 1`,
-      [email]
-    );
-
-    if (r.rows.length === 0) {
-      return res.json({ exists: false });
-    }
-
-    const user = r.rows[0];
-    return res.json({
-      exists: true,
-      user_id: user.id,
-      email: user.email,
-      plan: user.plan || null,
-      subscription_status: user.status || null,
-      discord_connected: !!user.discord_user_id
-    });
-  } catch (e) {
-    console.error('portal-init error:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// 🆕 CLAIM SUBSCRIPTION — leagă o plată Stripe (făcută cu alt email) la userul logat cu Google
-// Caz tipic: client a plătit cu yahoo, apoi se loghează cu Google care are alt email
-app.post('/api/claim-subscription', async (req, res) => {
-  const { stripe_email, current_email } = req.body;
-  if (!stripe_email || !current_email) {
-    return res.status(400).json({ error: 'stripe_email și current_email sunt obligatorii' });
-  }
-
-  // Normalizare (Stripe păstrează email-urile cu majuscule cum a scris clientul)
-  const stripeEmailNorm = stripe_email.trim().toLowerCase();
-  const currentEmailNorm = current_email.trim().toLowerCase();
-
-  if (stripeEmailNorm === currentEmailNorm) {
-    return res.status(400).json({ error: 'Cele două email-uri sunt identice — nu e nevoie de claim' });
-  }
-
-  try {
-    // 1. Verific dacă cumva există deja user cu email-ul curent (Google)
-    //    Dacă da, ar fi o coliziune (2 conturi pentru același Google email)
-    const existingCheck = await pool.query(
-      'SELECT id FROM users WHERE LOWER(email) = $1 LIMIT 1',
-      [currentEmailNorm]
-    );
-    if (existingCheck.rows.length > 0) {
-      return res.status(409).json({ 
-        error: 'Există deja un cont cu acest email Google. Contactează suportul.',
-        contact: 'discord'
-      });
-    }
-
-    // 2. Caut user-ul cu email-ul Stripe + subscription activ
-    const userQuery = await pool.query(
-      `SELECT u.id, u.email, s.status, s.plan
-       FROM users u
-       LEFT JOIN subscriptions s ON s.user_id = u.id
-       WHERE LOWER(u.email) = $1 LIMIT 1`,
-      [stripeEmailNorm]
-    );
-
-    if (userQuery.rows.length === 0) {
-      return res.status(404).json({ 
-        error: 'Nu am găsit niciun cont cu acest email Stripe. Verifică dacă ai scris corect.'
-      });
-    }
-
-    const user = userQuery.rows[0];
-
-    // 3. Verific că are subscription activ sau în grace period
-    if (!user.status || (user.status !== 'active' && user.status !== 'grace_period')) {
-      return res.status(403).json({
-        error: 'Nu există un abonament activ pentru acest email. Status: ' + (user.status || 'fără abonament')
-      });
-    }
-
-    // 4. Actualizez email-ul user-ului la cel curent (Google)
-    await pool.query(
-      'UPDATE users SET email = $1 WHERE id = $2',
-      [current_email.trim(), user.id]
-    );
-
-    console.log(`✅ Claim subscription: user_id ${user.id} - email schimbat din ${stripeEmailNorm} în ${currentEmailNorm}`);
-
-    // 5. Telegram notification
-    await sendTelegram(
-      `🔗 <b>Claim Subscription</b>\n` +
-      `📧 Email vechi (Stripe): ${stripeEmailNorm}\n` +
-      `📧 Email nou (Google): ${currentEmailNorm}\n` +
-      `📦 Plan: ${user.plan}\n` +
-      `✅ Cont conectat cu succes`
-    );
-
-    res.json({
-      success: true,
-      message: 'Cont conectat cu succes! Reîncarcă pagina ca să accesezi portalul.',
-      user_id: user.id,
-      plan: user.plan
-    });
-
-  } catch (e) {
-    console.error('claim-subscription error:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// 🆕 SESIUNEA 18: Endpoint preview schimbare plan
-// Returnează info pentru fiecare plan: limită, conflict, conturi active
-app.get('/api/plan-change-preview', async (req, res) => {
-  const { email } = req.query;
-  if (!email) return res.status(400).json({ error: 'email required' });
-
-  try {
-    // Caut user-ul
-    const userQ = await pool.query(
-      `SELECT u.id, s.plan AS current_plan, s.max_mt5_accounts AS current_max
-       FROM users u
-       LEFT JOIN subscriptions s ON s.user_id = u.id
-       WHERE u.email = $1 LIMIT 1`,
-      [email]
-    );
-    if (userQ.rows.length === 0) return res.status(404).json({ error: 'user not found' });
-    const user = userQ.rows[0];
-
-    // Conturile active ale userului (în ordinea adăugării)
-    const accountsQ = await pool.query(
-      `SELECT account_number, added_at
-       FROM mt5_accounts
-       WHERE user_id = $1 AND is_active = true
-       ORDER BY added_at ASC`,
-      [user.id]
-    );
-    const activeAccounts = accountsQ.rows.map(r => ({
-      number: r.account_number,
-      added_at: r.added_at
-    }));
-    const totalActive = activeAccounts.length;
-
-    // Pentru fiecare plan, calculează dacă există conflict
-    const planLimits = { basic: 1, pro: 2, full_access: 3 };
-    const plans = {};
-    for (const [planName, maxAcc] of Object.entries(planLimits)) {
-      plans[planName] = {
-        max: maxAcc,
-        needs_choice: totalActive > maxAcc,
-        to_remove: Math.max(0, totalActive - maxAcc)
-      };
-    }
-
-    res.json({
-      active_accounts: activeAccounts,
-      current_plan: user.current_plan,
-      current_max_accounts: user.current_max,
-      plans: plans
-    });
-  } catch (e) {
-    console.error('plan-change-preview error:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// 🆕 SESIUNEA 18: Endpoint salvare alegere conturi + deschidere Stripe Portal
-// Clientul a ales conturile pe care vrea să le păstreze; salvăm temporar (30 min)
-// Apoi la webhook customer.subscription.updated vom citi această alegere
-app.post('/api/save-plan-choice', async (req, res) => {
-  const { email, target_plan, accounts_to_keep } = req.body;
-  if (!email || !target_plan || !Array.isArray(accounts_to_keep)) {
-    return res.status(400).json({ error: 'email, target_plan, accounts_to_keep required' });
-  }
-
-  // Validez target_plan
-  const validPlans = ['basic', 'pro', 'full_access'];
-  if (!validPlans.includes(target_plan)) {
-    return res.status(400).json({ error: 'Invalid target_plan' });
-  }
-
-  // Validez limita
-  const planLimits = { basic: 1, pro: 2, full_access: 3 };
-  if (accounts_to_keep.length > planLimits[target_plan]) {
-    return res.status(400).json({ error: `Planul ${target_plan} permite max ${planLimits[target_plan]} conturi` });
-  }
-
-  try {
-    // Găsesc user-ul
-    const userQ = await pool.query(
-      'SELECT id, stripe_customer_id FROM users WHERE email = $1 LIMIT 1',
-      [email]
-    );
-    if (userQ.rows.length === 0) return res.status(404).json({ error: 'user not found' });
-    const user = userQ.rows[0];
-
-    // Verific că toate conturile alese sunt active și ale userului
-    const ownedAccountsQ = await pool.query(
-      `SELECT account_number FROM mt5_accounts 
-       WHERE user_id = $1 AND is_active = true AND account_number = ANY($2::text[])`,
-      [user.id, accounts_to_keep]
-    );
-    if (ownedAccountsQ.rows.length !== accounts_to_keep.length) {
-      return res.status(400).json({ error: 'Unele conturi alese nu sunt valide' });
-    }
-
-    // Șterg orice pending change vechi pentru acest user (curățare)
-    await pool.query('DELETE FROM pending_plan_changes WHERE user_id = $1', [user.id]);
-
-    // Salvez noua alegere
-    await pool.query(
-      `INSERT INTO pending_plan_changes (user_id, target_plan, accounts_to_keep)
-       VALUES ($1, $2, $3)`,
-      [user.id, target_plan, accounts_to_keep]
-    );
-
-    // Găsesc/creez stripe_customer_id
-    let customerId = user.stripe_customer_id;
-    if (!customerId) {
-      const customers = await stripe.customers.list({ email, limit: 1 });
-      if (customers.data.length > 0) {
-        customerId = customers.data[0].id;
-        await pool.query('UPDATE users SET stripe_customer_id=$1 WHERE id=$2', [customerId, user.id]);
-      } else {
-        return res.status(404).json({ error: 'No Stripe customer found' });
-      }
-    }
-
-    // Creez sesiune Stripe Customer Portal
-    const session = await stripe.billingPortal.sessions.create({
-      customer: customerId,
-      return_url: 'https://ea-license-server-lrsl.onrender.com/client'
-    });
-
-    console.log(`✅ Plan choice saved for ${email}: ${target_plan} keep ${accounts_to_keep.join(',')}`);
-    res.json({ success: true, stripe_portal_url: session.url });
-  } catch (e) {
-    console.error('save-plan-choice error:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// 🆕 SESIUNEA 11: Download EA file cu signed URL temporary (5 min)
-const SUPABASE_URL = 'https://cxtbthwoffyeazlxzequ.supabase.co';
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || '';
-
-// Inițializare Supabase client (pentru Storage signed URLs)
-let supabaseClient = null;
-try {
-  const { createClient } = require('@supabase/supabase-js');
-  if (SUPABASE_SERVICE_KEY) {
-    supabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
-    console.log('✅ Supabase client inițializat pentru Storage');
-  } else {
-    console.warn('⚠️  SUPABASE_SERVICE_KEY lipsește');
-  }
-} catch (e) {
-  console.error('Supabase init error:', e.message);
-}
-
-app.post('/api/download-ea', async (req, res) => {
-  const { email, ea_name } = req.body;
-  if (!email || !ea_name) return res.status(400).json({ error: 'Missing email or ea_name' });
-  
-  try {
-    // 1. Verific licența activă
-    const licCheck = await pool.query(`
-      SELECT el.file_name, el.status, u.id AS user_id
-      FROM ea_licenses el
-      JOIN users u ON u.id = el.user_id
-      WHERE u.email = $1 AND el.ea_name = $2 AND el.status = 'active'
-      LIMIT 1
-    `, [email, ea_name]);
-    
-    if (licCheck.rows.length === 0) {
-      return res.status(403).json({ error: 'Nu ai licență activă pentru acest EA' });
-    }
-    
-    const fileName = licCheck.rows[0].file_name;
-    if (!fileName) {
-      return res.status(404).json({ error: 'Fișier indisponibil. Contactează suport.' });
-    }
-    
-    if (!supabaseClient) {
-      return res.status(500).json({ error: 'Supabase client neinițializat. SUPABASE_SERVICE_KEY lipsește.' });
-    }
-    
-    // 2. Creez signed URL (5 minute) via Supabase JS client
-    const { data, error } = await supabaseClient
-      .storage
-      .from('ea-files')
-      .createSignedUrl(fileName, 300);
-    
-    if (error || !data || !data.signedUrl) {
-      console.error('Signed URL error:', error);
-      return res.status(500).json({ error: 'Nu am putut genera link de descărcare: ' + (error?.message || 'unknown') });
-    }
-    
-    // Log download
-    await logAccessV2(licCheck.rows[0].user_id, null, ea_name, req.ip, 'DOWNLOAD', true, true);
-    
-    res.json({ 
-      url: data.signedUrl,
-      file_name: fileName,
-      expires_in: 300
-    });
-    
-  } catch (e) {
-    console.error('Download error:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// 🆕 SESIUNEA 14: Endpoint - lista EA-uri disponibile + cele active ale userului
-app.get('/api/my-eas', async (req, res) => {
-  const { email } = req.query;
-  if (!email) return res.status(400).json({ error: 'email required' });
-  
-  const ALL_EAS = [
-    { name: 'ZigZag Fibo EA', file: 'Fibo_Final_V3.ex5' },
-    { name: 'Killer Indices EA', file: 'Killer_Indices_RobertAbo_V3.ex5' },
-    { name: 'Meneger Stock EA', file: 'Meneger_Stock_MarketsABO_V3.ex5' },
-    { name: 'Range Breakout EA', file: 'Range_Breakout_Abo_V3.ex5' },
-    { name: 'Robert Long EA', file: 'Robert_Long_Indices_ABO_V3.ex5' },
-    { name: 'Simple BuyDay EA', file: 'Simple__BuyDay_EAABO_V3.ex5' }
-  ];
-  
-  try {
-    const userRes = await pool.query(`
-      SELECT u.id, s.plan 
-      FROM users u 
-      LEFT JOIN subscriptions s ON s.user_id=u.id 
-      WHERE u.email=$1
-    `, [email]);
-    
-    if (userRes.rows.length === 0) return res.status(404).json({ error: 'user not found' });
-    const { id: userId, plan } = userRes.rows[0];
-    
-    // Max EA-uri permise pe plan
-    const planLimits = { 'basic': 1, 'pro': 3, 'full_access': 6 };
-    const maxEAs = planLimits[plan] || 1;
-    
-    // EA-urile active ale userului
-    const activeRes = await pool.query(
-      `SELECT ea_name FROM ea_licenses WHERE user_id=$1 AND status='active'`,
-      [userId]
-    );
-    const activeNames = activeRes.rows.map(r => r.ea_name);
-    
-    res.json({
-      plan: plan,
-      max_eas: maxEAs,
-      can_choose: plan !== 'full_access', // Full primește toate automat
-      all_eas: ALL_EAS.map(e => e.name),
-      active_eas: activeNames
-    });
-  } catch (e) {
-    console.error('my-eas error:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// 🆕 SESIUNEA 15: Endpoint - lista facturilor clientului (pentru portal RECHNUNGEN)
-app.get('/api/my-invoices', async (req, res) => {
-  const { email } = req.query;
-  if (!email) return res.status(400).json({ error: 'email required' });
-
-  try {
-    const userQuery = await pool.query(
-      `SELECT id FROM users WHERE email = $1 LIMIT 1`,
-      [email]
-    );
-
-    if (userQuery.rows.length === 0) {
-      return res.json({ invoices: [] });
-    }
-
-    const userId = userQuery.rows[0].id;
-
-    const invoicesQuery = await pool.query(`
-      SELECT 
-        i.stripe_invoice_id,
-        i.amount_cents,
-        i.currency,
-        i.status,
-        i.invoice_pdf_url,
-        i.paid_at,
-        i.created_at,
-        s.plan
-      FROM invoices i
-      LEFT JOIN subscriptions s ON s.id = i.subscription_id
-      WHERE i.user_id = $1
-      ORDER BY COALESCE(i.paid_at, i.created_at) DESC
-      LIMIT 50
-    `, [userId]);
-
-    res.json({
-      invoices: invoicesQuery.rows.map(r => ({
-        id: r.stripe_invoice_id,
-        amount: (r.amount_cents / 100).toFixed(2),
-        currency: (r.currency || 'eur').toUpperCase(),
-        status: r.status,
-        pdf_url: r.invoice_pdf_url,
-        paid_at: r.paid_at,
-        created_at: r.created_at,
-        plan: r.plan || 'unknown'
-      }))
-    });
-  } catch (e) {
-    console.error('Eroare listare facturi:', e.message);
-    res.status(500).json({ error: 'server error' });
-  }
-});
-
-// 🆕 SESIUNEA 14: Endpoint - clientul își alege EA-urile
-app.post('/api/update-my-eas', async (req, res) => {
-  const { email, ea_names } = req.body;
-  if (!email || !Array.isArray(ea_names)) return res.status(400).json({ error: 'email and ea_names required' });
-  
-  const EA_MAP = {
-    'ZigZag Fibo EA': 'Fibo_Final_V3.ex5',
-    'Killer Indices EA': 'Killer_Indices_RobertAbo_V3.ex5',
-    'Meneger Stock EA': 'Meneger_Stock_MarketsABO_V3.ex5',
-    'Range Breakout EA': 'Range_Breakout_Abo_V3.ex5',
-    'Robert Long EA': 'Robert_Long_Indices_ABO_V3.ex5',
-    'Simple BuyDay EA': 'Simple__BuyDay_EAABO_V3.ex5'
-  };
-  const ALL_EAS = Object.keys(EA_MAP);
-  
-  try {
-    // Verific user și plan
-    const userRes = await pool.query(`
-      SELECT u.id, s.id AS sub_id, s.plan, s.current_period_end
-      FROM users u 
-      LEFT JOIN subscriptions s ON s.user_id=u.id 
-      WHERE u.email=$1
-    `, [email]);
-    
-    if (userRes.rows.length === 0) return res.status(404).json({ error: 'user not found' });
-    const { id: userId, sub_id: subId, plan, current_period_end } = userRes.rows[0];
-    
-    // Verific dacă userul poate alege (Full primește toate automat)
-    if (plan === 'full_access') return res.status(400).json({ error: 'Full Access primește toate EA-urile automat' });
-    
-    // Verific limita
-    const planLimits = { 'basic': 1, 'pro': 3 };
-    const maxEAs = planLimits[plan];
-    if (!maxEAs) return res.status(400).json({ error: 'Plan invalid' });
-    
-    // Validez EA-urile alese
-    const valid = ea_names.filter(name => ALL_EAS.includes(name));
-    if (valid.length === 0) return res.status(400).json({ error: 'Niciun EA valid' });
-    if (valid.length > maxEAs) return res.status(400).json({ error: `Maxim ${maxEAs} EA-uri pentru planul ${plan}` });
-    
-    // Șterg toate EA-urile vechi și adaug doar cele alese
-    await pool.query('DELETE FROM ea_licenses WHERE user_id=$1', [userId]);
-    
-    const expires = current_period_end || new Date(Date.now() + 30*24*60*60*1000).toISOString();
-    for (const eaName of valid) {
-      await pool.query(
-        `INSERT INTO ea_licenses (user_id, subscription_id, ea_name, file_name, status, activated_at, expires_at)
-         VALUES ($1, $2, $3, $4, 'active', NOW(), $5)`,
-        [userId, subId, eaName, EA_MAP[eaName], expires]
-      );
-    }
-    
-    await sendTelegram(`✏️ <b>EA-uri actualizate de client</b>\n📧 ${email}\n📦 Plan: ${plan}\n🤖 EA-uri: ${valid.join(', ')}`);
-    
-    res.json({ success: true, active_eas: valid, max_eas: maxEAs });
-  } catch (e) {
-    console.error('update-my-eas error:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// 🆕 SESIUNEA 12: Endpoint admin pentru detectare abuzuri
-app.get('/admin/abuse-report', adminAuth, async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT 
-        u.id AS user_id,
-        u.email,
-        u.full_name,
-        u.created_at AS user_since,
-        COUNT(m.id) AS total_accounts,
-        COUNT(CASE WHEN m.is_active = true THEN 1 END) AS active_accounts,
-        COUNT(CASE WHEN m.is_active = false THEN 1 END) AS removed_accounts,
-        MAX(m.added_at) AS last_added,
-        MAX(m.removed_at) AS last_removed,
-        s.plan,
-        s.max_mt5_accounts
-      FROM users u
-      LEFT JOIN mt5_accounts m ON m.user_id = u.id
-      LEFT JOIN subscriptions s ON s.user_id = u.id AND s.status IN ('active', 'grace_period')
-      GROUP BY u.id, u.email, u.full_name, u.created_at, s.plan, s.max_mt5_accounts
-      HAVING COUNT(m.id) > 0
-      ORDER BY removed_accounts DESC, total_accounts DESC
-    `);
-    
-    // Calculez "risk score" pentru fiecare user
-    const enriched = result.rows.map(r => {
-      const removedCount = parseInt(r.removed_accounts);
-      const totalCount = parseInt(r.total_accounts);
-      const maxAllowed = parseInt(r.max_mt5_accounts) || 1;
-      
-      // Risc = câte conturi a folosit în total raportat la plan
-      const ratio = totalCount / maxAllowed;
-      let risk = 'low';
-      if (ratio >= 3) risk = 'high';
-      else if (ratio >= 2) risk = 'medium';
-      
-      return { ...r, risk_level: risk };
-    });
-    
-    res.json(enriched);
-  } catch (e) {
-    console.error('Abuse report error:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// 🆕 Endpoint detalii conturi MT5 per user (istoric complet)
-app.get('/admin/user-accounts/:user_id', adminAuth, async (req, res) => {
-  try {
-    const result = await pool.query(`
-      SELECT account_number, broker, is_active, added_at, removed_at
-      FROM mt5_accounts
-      WHERE user_id = $1
-      ORDER BY added_at DESC
-    `, [req.params.user_id]);
-    res.json(result.rows);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ─── Discord OAuth ────────────────────────────────────────────────────────────
-const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID;
-const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
-
-app.get('/auth/discord', (req, res) => {
-  const { email } = req.query;
-  if (!email) return res.status(400).send('Missing email — trebuie să fii logat în portal');
-  
-  const redirectUri = 'https://ea-license-server-lrsl.onrender.com/auth/discord/callback';
-  const scope = 'identify email guilds.join';
-  // Encode email-ul portal în state (base64) ca să-l recuperăm la callback
-  const state = Buffer.from(email).toString('base64');
-  const authUrl = `https://discord.com/api/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&state=${state}`;
-  res.redirect(authUrl);
-});
-
-app.get('/auth/discord/callback', async (req, res) => {
-  const { code, state } = req.query;
-  if (!code) return res.status(400).send('Missing code');
-  if (!state) return res.status(400).send('Missing state');
-
-  // Decodez emailul portal din state
-  let portalEmail;
-  try {
-    portalEmail = Buffer.from(state, 'base64').toString('utf-8');
-  } catch (e) {
-    return res.status(400).send('Invalid state');
-  }
-
-  try {
-    // Exchange code for token
-    const tokenRes = await fetch('https://discord.com/api/oauth2/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id: DISCORD_CLIENT_ID,
-        client_secret: DISCORD_CLIENT_SECRET,
-        grant_type: 'authorization_code',
-        code: code,
-        redirect_uri: 'https://ea-license-server-lrsl.onrender.com/auth/discord/callback'
-      })
-    });
-    const tokenData = await tokenRes.json();
-
-    if (!tokenData.access_token) {
-      console.error('Discord OAuth error:', tokenData);
-      return res.status(500).send('Failed to get access token');
-    }
-
-    // Get Discord user info
-    const userRes = await fetch('https://discord.com/api/users/@me', {
-      headers: { Authorization: `Bearer ${tokenData.access_token}` }
-    });
-    const userData = await userRes.json();
-
-    const discordUserId = userData.id;
-    const discordUsername = userData.username + (userData.discriminator && userData.discriminator !== '0' ? `#${userData.discriminator}` : '');
-
-    // 🆕 Folosim EMAILUL DIN PORTAL (din state), nu emailul Discord
-    const upd = await pool.query(
-      'UPDATE users SET discord_user_id=$1, discord_username=$2 WHERE email=$3 RETURNING id',
-      [discordUserId, discordUsername, portalEmail]
-    );
-    console.log(`Discord OAuth: portal_email=${portalEmail} discord_id=${discordUserId} updated_rows=${upd.rowCount}`);
-
-    if (upd.rowCount === 0) {
-      return res.status(404).send(`<html><body style="font-family:sans-serif;text-align:center;padding:50px;background:#0a0c0f;color:#e8eaf0;">
-        <h1 style="color:#ff3d5a;">❌ Eroare</h1>
-        <p>Nu am găsit user-ul cu emailul: ${portalEmail}</p>
-        <a href="/client" style="color:#00e5a0;">Înapoi la portal →</a>
-      </body></html>`);
-    }
-
-    // 🆕 AUTO-JOIN: dacă userul nu e pe server, îl adăugăm automat folosind guilds.join
-    let autoJoinMsg = '';
-    try {
-      if (discordClient.isReady()) {
-        const guild = await discordClient.guilds.fetch(DISCORD_GUILD_ID);
-        const existingMember = await guild.members.fetch(discordUserId).catch(() => null);
-
-        if (!existingMember) {
-          console.log(`🔗 Auto-join: ${discordUsername} (${discordUserId}) nu e pe server, îl adaug...`);
-          const joinRes = await fetch(`https://discord.com/api/guilds/${DISCORD_GUILD_ID}/members/${discordUserId}`, {
-            method: 'PUT',
-            headers: {
-              'Authorization': `Bot ${process.env.DISCORD_BOT_TOKEN}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ access_token: tokenData.access_token })
-          });
-
-          if (joinRes.status === 201) {
-            console.log(`✅ Auto-join: ${discordUsername} adăugat pe server`);
-            autoJoinMsg = `<p style="color:#00e5a0;font-size:14px;">🎉 Ai fost adăugat automat pe serverul Discord!</p>`;
-            await sendTelegram(`🔗 <b>Auto-join Discord:</b>\n📧 ${portalEmail}\n💬 ${discordUsername}`);
-            // Log în discord_events
-            await pool.query(
-              'INSERT INTO discord_events (user_id, discord_user_id, event_type, details) VALUES ($1, $2, $3, $4)',
-              [upd.rows[0].id, discordUserId, 'auto_joined', 'Adăugat automat prin OAuth guilds.join']
-            ).catch(e => console.error('Log auto_join error:', e.message));
-          } else if (joinRes.status === 204) {
-            console.log(`ℹ Auto-join: ${discordUsername} deja pe server`);
-          } else {
-            const joinErr = await joinRes.text();
-            console.error(`❌ Auto-join failed: HTTP ${joinRes.status} - ${joinErr}`);
-          }
-        } else {
-          console.log(`ℹ Auto-join: ${discordUsername} deja pe server, sar peste`);
-        }
-      }
-    } catch (joinErr) {
-      console.error('Auto-join exception:', joinErr.message);
-      // Nu blocăm flow-ul — rolul se va încerca oricum
-    }
-
-    // 🆕 SESIUNEA 14: Auto-verificare abonament activ → dă rolul automat
-    let autoRoleMsg = '';
-    try {
-      const subCheck = await pool.query(
-        `SELECT plan FROM subscriptions WHERE user_id=$1 AND status IN ('active', 'grace_period') LIMIT 1`,
-        [upd.rows[0].id]
-      );
-      if (subCheck.rows.length > 0) {
-        const plan = subCheck.rows[0].plan;
-        const planForDiscord = plan === 'full_access' ? 'full' : plan;
-        const roleAdded = await addDiscordRole(portalEmail, planForDiscord);
-        if (roleAdded) {
-          autoRoleMsg = `<p style="color:#00e5a0;font-size:14px;">🎉 Rolul <b>${plan.toUpperCase()}</b> a fost adăugat automat pe Discord!</p>`;
-          await sendTelegram(`💬 <b>Discord conectat + rol auto:</b>\n📧 ${portalEmail}\n📦 Plan: ${plan}`);
-        }
-      }
-    } catch (e) {
-      console.error('Auto-role error:', e.message);
-    }
-
-    // Redirect înapoi la portal
-    res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:50px;background:#0a0c0f;color:#e8eaf0;">
-      <h1 style="color:#00e5a0;">✅ Discord conectat!</h1>
-      <p>Contul Discord <b>${discordUsername}</b> a fost conectat la <b>${portalEmail}</b></p>
-      ${autoJoinMsg}
-      ${autoRoleMsg}
-      <a href="/client" style="color:#00e5a0;">Înapoi la portal →</a>
-      <script>setTimeout(() => window.location.href='/client', 3500);</script>
-    </body></html>`);
-
-  } catch (err) {
-    console.error('Discord OAuth error:', err);
-    res.status(500).send('OAuth error');
-  }
-});
-
-// 🆕 SESIUNEA 8: Endpoint test rol din browser (protejat cu admin key în URL)
-app.get('/api/discord-give-role', async (req, res) => {
-  const { key, email, plan } = req.query;
-  if (key !== ADMIN_KEY) return res.status(401).json({ error: 'Wrong admin key' });
-  if (!email || !plan) return res.status(400).json({ error: 'Missing email or plan' });
-  
-  const result = await addDiscordRole(email, plan);
-  res.json({ success: result, email, plan });
-});
-
-// 🆕 SESIUNEA 8: Endpoint test bot Discord (verifică că botul răspunde + DB e ok)
-app.get('/api/discord-test', async (req, res) => {
-  try {
-    const botReady = discordClient.isReady();
-    const botTag = botReady ? discordClient.user.tag : null;
-    
-    // Verifică câți useri au discord_user_id setat
-    const connected = await pool.query('SELECT COUNT(*) FROM users WHERE discord_user_id IS NOT NULL');
-    
-    // Ultimele 5 evenimente Discord
-    const events = await pool.query('SELECT event_type, role_name, details, created_at FROM discord_events ORDER BY id DESC LIMIT 5');
-    
-    res.json({
-      bot_ready: botReady,
-      bot_tag: botTag,
-      guild_id: DISCORD_GUILD_ID,
-      roles: DISCORD_ROLES,
-      users_with_discord: parseInt(connected.rows[0].count),
-      recent_events: events.rows
-    });
-  } catch(e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ─── Stripe: Creare link plată ────────────────────────────────────────────────
-// Acum acceptă și plan + eas din landing page
-app.post('/api/create-payment', async (req, res) => {
-  const { account_id, email, months = 1, plan = 'basic', eas = '' } = req.body;
-  if (!account_id) return res.status(400).json({ error: 'account_id required' });
-  
-  // 🆕 SESIUNEA 13: Mapare price_id după plan
-  const PLAN_PRICES = {
-    'basic': process.env.STRIPE_PRICE_BASIC || process.env.STRIPE_PRICE_ID,
-    'pro': process.env.STRIPE_PRICE_PRO || process.env.STRIPE_PRICE_ID,
-    'full': process.env.STRIPE_PRICE_FULL || process.env.STRIPE_PRICE_ID,
-    'full_access': process.env.STRIPE_PRICE_FULL || process.env.STRIPE_PRICE_ID
-  };
-  const priceId = PLAN_PRICES[plan.toLowerCase()] || PLAN_PRICES['basic'];
-  
-  try {
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ['card'],
-      mode: 'subscription',
-      customer_email: email || undefined,
-      line_items: [{ price: priceId, quantity: months }],
-      metadata: {
-        account_id,
-        months: String(months),
-        email: email || '',
-        plan: plan,
-        eas: eas
-      },
-      success_url: 'https://ea-license-server-lrsl.onrender.com/payment-success?session_id={CHECKOUT_SESSION_ID}',
-      cancel_url:  'https://ea-license-server-lrsl.onrender.com/payment-cancel',
-    });
-    res.json({ url: session.url, session_id: session.id });
-  } catch(e) {
-    console.error('Stripe error:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ─── Stripe: Webhook ──────────────────────────────────────────────────────────
-app.post('/webhook', async (req, res) => {
-  const sig = req.headers['stripe-signature'];
-  let event;
-  try {
-    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
-  } catch(e) {
-    return res.status(400).send(`Webhook Error: ${e.message}`);
-  }
-
-  if (event.type === 'checkout.session.completed') {
-    const session = event.data.object;
-    const { account_id, months, plan, eas } = session.metadata;
-    // 🆕 FIX: Email-ul vine din Stripe customer_details (după plată) sau metadata sau customer_email
-    // Stripe garantează că customer_details.email există DUPĂ plată reușită
-    const email = session.customer_details?.email 
-                || session.customer_email 
-                || session.metadata.email 
-                || null;
-    const planNormalized = (plan || 'basic').toLowerCase();
-    const monthsInt = parseInt(months) || 1;
-    const base = new Date();
-    base.setDate(base.getDate() + (monthsInt * 30));
-    const expiresAt = base.toISOString().split('T')[0];
-    const expiresAtFull = base.toISOString();
-
-    // Salvează planul și EA-urile in notes pentru referinta
-    const notesText = eas
-      ? `Plată Stripe | Plan: ${plan} | EA-uri: ${eas}`
-      : `Plată Stripe automată | Plan: ${plan || 'basic'}`;
-
-    // 1️⃣ SISTEM VECHI: licenses (backwards compat)
-    await pool.query(`
-      INSERT INTO licenses (account_id, email, plan, status, expires_at, notes)
-      VALUES ($1,$2,$3,'active',$4,$5)
-      ON CONFLICT(account_id) DO UPDATE SET
-        email=excluded.email, plan=excluded.plan,
-        status='active', expires_at=excluded.expires_at, notes=excluded.notes
-    `, [account_id, email, planNormalized, expiresAt, notesText]);
-
-    // 🆕 SESIUNEA 13: SISTEM NOU — users + subscriptions + mt5_accounts + ea_licenses
-    if (email) {
-      try {
-        // Plan mapping pentru tabela subscriptions
-        const planForSub = planNormalized === 'full' ? 'full_access' : planNormalized;
-        const maxAccounts = planForSub === 'full_access' ? 3 : planForSub === 'pro' ? 2 : 1;
-        
-        // 1. Caut/creez user în tabela users
-        let userResult = await pool.query('SELECT id FROM users WHERE email=$1', [email]);
-        let userId;
-        if (userResult.rows.length === 0) {
-          const newUser = await pool.query(
-            'INSERT INTO users (email, stripe_customer_id) VALUES ($1, $2) RETURNING id',
-            [email, session.customer || null]
-          );
-          userId = newUser.rows[0].id;
-        } else {
-          userId = userResult.rows[0].id;
-          // Update stripe_customer_id dacă lipsește
-          if (session.customer) {
-            await pool.query(
-              'UPDATE users SET stripe_customer_id=$1 WHERE id=$2 AND stripe_customer_id IS NULL',
-              [session.customer, userId]
-            );
-          }
-        }
-        
-        // 2. UPSERT subscription pentru acest user
-        const existingSub = await pool.query('SELECT id FROM subscriptions WHERE user_id=$1', [userId]);
-        let subId;
-        if (existingSub.rows.length === 0) {
-          const newSub = await pool.query(
-            `INSERT INTO subscriptions (user_id, plan, max_mt5_accounts, status, current_period_end, stripe_subscription_id)
-             VALUES ($1, $2, $3, 'active', $4, $5) RETURNING id`,
-            [userId, planForSub, maxAccounts, expiresAtFull, session.subscription || null]
-          );
-          subId = newSub.rows[0].id;
-        } else {
-          subId = existingSub.rows[0].id;
-          await pool.query(
-            `UPDATE subscriptions SET plan=$1, max_mt5_accounts=$2, status='active', 
-             current_period_end=$3, grace_period_until=NULL,
-             stripe_subscription_id=COALESCE(stripe_subscription_id, $4)
-             WHERE id=$5`,
-            [planForSub, maxAccounts, expiresAtFull, session.subscription || null, subId]
-          );
-        }
-        
-        // 3. Adaug cont MT5 (dacă nu există deja activ)
-        if (account_id) {
-          const accCheck = await pool.query(
-            'SELECT id FROM mt5_accounts WHERE user_id=$1 AND account_number=$2',
-            [userId, account_id]
-          );
-          if (accCheck.rows.length === 0) {
-            await pool.query(
-              `INSERT INTO mt5_accounts (user_id, subscription_id, account_number, is_active, added_at)
-               VALUES ($1, $2, $3, true, NOW())`,
-              [userId, subId, account_id]
-            );
-          } else {
-            // Reactivez dacă era inactiv
-            await pool.query(
-              'UPDATE mt5_accounts SET is_active=true, removed_at=NULL, subscription_id=$1 WHERE id=$2',
-              [subId, accCheck.rows[0].id]
-            );
-          }
-        }
-        
-        // 4. EA licenses — mapping nume frumos → fișier tehnic
-        const EA_MAP = {
-          'ZigZag Fibo EA': 'Fibo_Final_V3.ex5',
-          'Killer Indices EA': 'Killer_Indices_RobertAbo_V3.ex5',
-          'Meneger Stock EA': 'Meneger_Stock_MarketsABO_V3.ex5',
-          'Range Breakout EA': 'Range_Breakout_Abo_V3.ex5',
-          'Robert Long EA': 'Robert_Long_Indices_ABO_V3.ex5',
-          'Simple BuyDay EA': 'Simple__BuyDay_EAABO_V3.ex5'
-        };
-        const ALL_EAS = Object.keys(EA_MAP);
-        
-        // Determin ce EA-uri primește acest plan
-        let eaList = [];
-        if (planForSub === 'full_access') {
-          // Full = toate 6
-          eaList = ALL_EAS;
-        } else if (eas) {
-          // EA-uri alese explicit (din metadata Stripe)
-          eaList = eas.split(',').map(s => s.trim()).filter(s => ALL_EAS.includes(s));
-          // Limită pe plan
-          const maxEAs = planForSub === 'pro' ? 3 : 1;
-          eaList = eaList.slice(0, maxEAs);
-        }
-        
-        // Ștergem EA-urile vechi și punem cele noi
-        if (eaList.length > 0) {
-          await pool.query('DELETE FROM ea_licenses WHERE user_id=$1', [userId]);
-          for (const eaName of eaList) {
-            await pool.query(
-              `INSERT INTO ea_licenses (user_id, subscription_id, ea_name, file_name, status, activated_at, expires_at)
-               VALUES ($1, $2, $3, $4, 'active', NOW(), $5)`,
-              [userId, subId, eaName, EA_MAP[eaName], expiresAtFull]
-            );
-          }
-        }
-        
-        console.log(`✅ Webhook: user ${email} (id=${userId}) actualizat la ${planForSub}, ${eaList.length} EA-uri`);
-
-        // 🆕 SESIUNEA 15-FIX v2: Sincronizez TOATE facturile lipsă ale acestui customer
-        await saveInvoiceFromStripe(session.invoice || null, userId, subId, email, session.customer || null);
-      } catch (e) {
-        console.error('Webhook NEW system error:', e.message);
-        await sendTelegram(`⚠️ <b>Eroare sistem nou:</b>\n${e.message}\n📧 ${email}`);
-      }
-    }
-
-    // 5. Discord rol automat (folosește planNormalized)
-    if (email) await addDiscordRole(email, planNormalized);
-
-    // ─── Telegram cu toate detaliile pentru tine ─────────────────
-    const easLine = eas
-      ? `\n🤖 <b>EA-uri alese:</b> ${eas}`
-      : '';
-    const planLine = plan
-      ? `\n📦 <b>Plan:</b> ${plan}`
-      : '';
-
-    await sendTelegram(
-      `💳 <b>PLATĂ NOUĂ PRIMITĂ!</b>\n` +
-      `👤 Cont MT5: <b>#${account_id}</b>\n` +
-      `📧 Email: ${email || 'nespecificat'}` +
-      planLine +
-      easLine +
-      `\n📅 Activ până: ${expiresAt}\n` +
-      `\n✅ <b>Activare automată completă</b> — clientul are acces în portal acum.`
-    );
-  }
-
-  // 🆕 SESIUNEA 13: Gestionare schimbare plan (upgrade/downgrade)
-  if (event.type === 'customer.subscription.updated') {
-    const sub = event.data.object;
-    const stripeCustomerId = sub.customer;
-    const stripeSubId = sub.id;
-    
-    try {
-      // 🛡️ Caut period_end oriunde e (Stripe variază între versiuni)
-      const rawPeriodEnd = sub.current_period_end 
-                        || sub.items?.data?.[0]?.current_period_end 
-                        || sub.billing_cycle_anchor;
-      
-      // Caut user după stripe_customer_id
-      let userResult = await pool.query('SELECT id, email FROM users WHERE stripe_customer_id=$1', [stripeCustomerId]);
-      if (userResult.rows.length === 0) {
-        console.log(`Webhook update: user neînregistrat pentru ${stripeCustomerId}`);
-        return res.json({ received: true });
-      }
-      const user = userResult.rows[0];
-      
-      // Determin noul plan din price amount
-      const priceAmount = sub.items?.data?.[0]?.price?.unit_amount; // în cenți
-      
-      let newPlan = 'basic';
-      let maxAccounts = 1;
-      if (priceAmount >= 6500) { newPlan = 'full_access'; maxAccounts = 3; }
-      else if (priceAmount >= 4000) { newPlan = 'pro'; maxAccounts = 2; }
-      
-      // Calculez period_end, default 30 zile dacă lipsește
-      let periodEnd;
-      if (rawPeriodEnd && !isNaN(rawPeriodEnd)) {
-        periodEnd = new Date(rawPeriodEnd * 1000);
-      } else {
-        periodEnd = new Date();
-        periodEnd.setDate(periodEnd.getDate() + 30);
-        console.log('⚠️ period_end lipsește, folosesc default +30 zile');
-      }
-      
-      const newStatus = 'active';
-      
-      // Update subscription în DB (sistem nou)
-      await pool.query(
-        `UPDATE subscriptions SET plan=$1, max_mt5_accounts=$2, status=$3, current_period_end=$4 
-         WHERE user_id=$5`,
-        [newPlan, maxAccounts, newStatus, periodEnd.toISOString(), user.id]
-      );
-
-      // 🆕 SESIUNEA 18: Verifică dacă există alegerea clientului în pending_plan_changes
-      // Dacă DA → respectă alegerea (păstrează doar conturile alese de client)
-      // Dacă NU → fallback la comportamentul automat (cele mai vechi rămân)
-      try {
-        const activeAccountsQuery = await pool.query(
-          `SELECT id, account_number FROM mt5_accounts 
-           WHERE user_id=$1 AND is_active=true 
-           ORDER BY added_at ASC`,
-          [user.id]
-        );
-        const activeAccounts = activeAccountsQuery.rows;
-        
-        if (activeAccounts.length > maxAccounts) {
-          // Caut alegerea clientului (nu expirată)
-          const pendingQ = await pool.query(
-            `SELECT accounts_to_keep FROM pending_plan_changes 
-             WHERE user_id=$1 AND target_plan=$2 AND expires_at > NOW()
-             ORDER BY created_at DESC LIMIT 1`,
-            [user.id, newPlan]
-          );
-          
-          let accountsToKeep = [];
-          let choiceSource = '';
-          
-          if (pendingQ.rows.length > 0) {
-            // CLIENTUL A ALES — respectă alegerea lui
-            accountsToKeep = pendingQ.rows[0].accounts_to_keep || [];
-            choiceSource = 'alegerea clientului';
-          } else {
-            // FALLBACK — păstrează cele mai vechi N
-            accountsToKeep = activeAccounts.slice(0, maxAccounts).map(a => a.account_number);
-            choiceSource = 'cele mai vechi (auto)';
-          }
-          
-          // Dezactivez conturile care NU sunt în lista de păstrat
-          const toDeactivate = activeAccounts.filter(a => !accountsToKeep.includes(a.account_number));
-          for (const acc of toDeactivate) {
-            await pool.query(
-              `UPDATE mt5_accounts SET is_active=false, removed_at=NOW() WHERE id=$1`,
-              [acc.id]
-            );
-            console.log(`🚫 Dezactivat cont MT5 ${acc.account_number} pentru ${user.email} (downgrade la ${newPlan}, sursă: ${choiceSource})`);
-          }
-          
-          if (toDeactivate.length > 0) {
-            await sendTelegram(
-              `⚠️ <b>Dezactivare conturi la downgrade</b>\n📧 ${user.email}\n📦 Plan nou: ${newPlan} (max ${maxAccounts} conturi)\n✅ Păstrate: ${accountsToKeep.map(n => '#' + n).join(', ')}\n🚫 Dezactivate: ${toDeactivate.map(a => '#' + a.account_number).join(', ')}\nℹ️ Sursă alegere: ${choiceSource}`
-            );
-          }
-          
-          // Cleanup pending_plan_changes după ce am aplicat alegerea
-          if (pendingQ.rows.length > 0) {
-            await pool.query('DELETE FROM pending_plan_changes WHERE user_id=$1', [user.id]);
-          }
-        }
-      } catch (e) {
-        console.error('Plan change accounts handling error:', e.message);
-      }
-      
-      // 🆕 Update și tabela licenses (sistem vechi folosit de admin panel)
-      const legacyPlan = newPlan === 'full_access' ? 'full' : newPlan;
-      const legacyExpires = periodEnd.toISOString().split('T')[0];
-      await pool.query(
-        `UPDATE licenses SET plan=$1, expires_at=$2, status='active' WHERE email=$3`,
-        [legacyPlan, legacyExpires, user.email]
-      );
-      
-      // 🆕 SESIUNEA 14: La schimbare plan, șterg EA-urile vechi
-      // - Pentru full_access → adaug toate 6 automat
-      // - Pentru basic/pro → șterg toate (clientul alege din portal)
-      const EA_MAP = {
-        'ZigZag Fibo EA': 'Fibo_Final_V3.ex5',
-        'Killer Indices EA': 'Killer_Indices_RobertAbo_V3.ex5',
-        'Meneger Stock EA': 'Meneger_Stock_MarketsABO_V3.ex5',
-        'Range Breakout EA': 'Range_Breakout_Abo_V3.ex5',
-        'Robert Long EA': 'Robert_Long_Indices_ABO_V3.ex5',
-        'Simple BuyDay EA': 'Simple__BuyDay_EAABO_V3.ex5'
-      };
-      
-      // Șterg toate EA-urile vechi
-      await pool.query('DELETE FROM ea_licenses WHERE user_id=$1', [user.id]);
-      
-      // Iau sub_id pentru folosire ulterioară
-      const subQuery = await pool.query('SELECT id FROM subscriptions WHERE user_id=$1', [user.id]);
-      const subIdForUser = subQuery.rows[0]?.id;
-      
-      if (newPlan === 'full_access' && subIdForUser) {
-        // Full = adaug toate 6 automat
-        for (const [eaName, fileName] of Object.entries(EA_MAP)) {
-          await pool.query(
-            `INSERT INTO ea_licenses (user_id, subscription_id, ea_name, file_name, status, activated_at, expires_at)
-             VALUES ($1, $2, $3, $4, 'active', NOW(), $5)`,
-            [user.id, subIdForUser, eaName, fileName, periodEnd.toISOString()]
-          );
-        }
-      }
-      // Pentru basic/pro: rămân fără EA-uri, clientul va alege din portal
-      
-      // Update Discord rol
-      await addDiscordRole(user.email, newPlan === 'full_access' ? 'full' : newPlan);
-      
-      const planLabel = sub.cancel_at_period_end ? `${newPlan} (anulare programată)` : newPlan;
-      await sendTelegram(
-        `🔄 <b>ABONAMENT MODIFICAT</b>\n📧 ${user.email}\n📦 Plan nou: <b>${planLabel}</b>\n📅 Activ până: ${periodEnd.toISOString().split('T')[0]}`
-      );
-      
-      console.log(`✅ Subscription updated for ${user.email}: ${newPlan}`);
-
-      // 🆕 SESIUNEA 15-FIX v2: Sincronizez TOATE facturile lipsă ale acestui customer
-      // Aceasta abordare e robustă: cere lista completă de la Stripe, salvează doar cele NOI
-      if (subIdForUser) {
-        await saveInvoiceFromStripe(sub.latest_invoice || null, user.id, subIdForUser, user.email, stripeCustomerId);
-      }
-    } catch (e) {
-      console.error('Subscription update error:', e.message);
-      await sendTelegram(`⚠️ <b>Eroare update sub:</b>\n${e.message}`);
-    }
-  }
-
-  // 🆕 SESIUNEA 13: Gestionare anulare abonament
-  if (event.type === 'customer.subscription.deleted') {
-    const sub = event.data.object;
-    const stripeCustomerId = sub.customer;
-    
-    try {
-      const userResult = await pool.query('SELECT id, email FROM users WHERE stripe_customer_id=$1', [stripeCustomerId]);
-      if (userResult.rows.length === 0) return res.json({ received: true });
-      const user = userResult.rows[0];
-      
-      // Marchez subscription expirat + intră în grace 30 zile
-      const graceEnd = new Date();
-      graceEnd.setDate(graceEnd.getDate() + 30);
-      
-      await pool.query(
-        `UPDATE subscriptions SET status='grace_period', grace_period_until=$1 WHERE user_id=$2`,
-        [graceEnd.toISOString(), user.id]
-      );
-      
-      // Marchez și EA licenses (rămân active 30 zile prin grace_period)
-      await pool.query(
-        `UPDATE ea_licenses SET expires_at=$1 WHERE user_id=$2 AND status='active'`,
-        [graceEnd.toISOString(), user.id]
-      );
-      
-      // Trimit DM pe Discord cu avertisment grace
-      await removeDiscordRole(user.email, true, 'Abonament anulat — grace 30 zile');
-      
-      // Legacy sistem
-      await pool.query("UPDATE licenses SET status='expired' WHERE email=$1", [user.email]);
-      
-      await sendTelegram(
-        `❌ <b>ABONAMENT ANULAT</b>\n📧 ${user.email}\n⏰ Grace 30 zile activ\n📅 Kick automat: ${graceEnd.toISOString().split('T')[0]}`
-      );
-      
-      console.log(`✅ Subscription cancelled for ${user.email}, grace until ${graceEnd}`);
-    } catch (e) {
-      console.error('Subscription delete error:', e.message);
-    }
-  }
-
-  // 🆕 SESIUNEA 15: Handler pentru invoice.paid (BACKUP — Stripe poate să nu-l trimită mereu)
-  // Soluția principală e în customer.subscription.updated mai sus (care vine 100%)
-  if (event.type === 'invoice.paid' || event.type === 'invoice.payment_succeeded') {
-    const inv = event.data.object;
-    const customerEmail = inv.customer_email || (inv.customer_address && inv.customer_address.email);
-
-    try {
-      // Găsim user-ul în Supabase după email sau stripe_customer_id
-      let userQuery = null;
-      if (inv.customer) {
-        userQuery = await pool.query(
-          `SELECT id, email FROM users WHERE stripe_customer_id = $1 LIMIT 1`,
-          [inv.customer]
-        );
-      }
-      if ((!userQuery || userQuery.rows.length === 0) && customerEmail) {
-        userQuery = await pool.query(
-          `SELECT id, email FROM users WHERE email = $1 LIMIT 1`,
-          [customerEmail]
-        );
-      }
-
-      if (userQuery && userQuery.rows.length > 0) {
-        const userId = userQuery.rows[0].id;
-        const userEmail = userQuery.rows[0].email || customerEmail;
-
-        // Găsim subscription_id dacă există
-        let subId = null;
-        if (inv.subscription) {
-          const subQuery = await pool.query(
-            `SELECT id FROM subscriptions WHERE stripe_subscription_id = $1 LIMIT 1`,
-            [inv.subscription]
-          );
-          if (subQuery.rows.length > 0) subId = subQuery.rows[0].id;
-        }
-
-        // Folosim funcția unificată (sync TOATE facturile lipsă)
-        await saveInvoiceFromStripe(inv.id, userId, subId, userEmail, inv.customer || null);
-      } else {
-        console.warn(`⚠️ Invoice ${inv.id} primit dar user negăsit (email: ${customerEmail})`);
-      }
-    } catch (e) {
-      console.error('Eroare salvare factură (invoice.paid handler):', e.message);
-    }
-  }
-
-  if (event.type === 'invoice.payment_failed') {
-    const obj = event.data.object;
-    const email = obj.customer_email || obj.metadata?.email;
-    if (email) {
-      await sendTelegram(`⚠️ <b>Plată eșuată</b>\n📧 ${email}\n💳 Stripe va încerca din nou automat`);
-    }
-  }
-
-  res.json({ received: true });
-});
-
-// ─── Discord manual ───────────────────────────────────────────────────────────
-app.post('/discord/add-role', adminAuth, async (req, res) => {
-  const result = await addDiscordRole(req.body.email, req.body.plan);
-  res.json({ success: result });
-});
-
-app.post('/discord/remove-role', adminAuth, async (req, res) => {
-  const result = await removeDiscordRole(req.body.email);
-  res.json({ success: result });
-});
-
-// ─── Pagini Stripe ────────────────────────────────────────────────────────────
-app.get('/payment-success', (req, res) => {
-  res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:50px;background:#0a0c0f;color:#e8eaf0;">
-    <h1 style="color:#00e5a0;">✅ Plată reușită!</h1>
-    <p>Abonamentul tău a fost activat. Vei primi EA-ul pe Discord în scurt timp.</p>
-    <a href="/client" style="color:#00e5a0;">Mergi la portal →</a>
-  </body></html>`);
-});
-
-app.get('/payment-cancel', (req, res) => {
-  res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:50px;background:#0a0c0f;color:#e8eaf0;">
-    <h1 style="color:#ff3d5a;">❌ Plată anulată</h1>
-    <a href="/landing" style="color:#00e5a0;">Înapoi →</a>
-  </body></html>`);
-});
-
-// ─── Check Status ─────────────────────────────────────────────────────────────
-app.get('/check-status', async (req, res) => {
-  const { account } = req.query;
-  if (!account) {
-    return res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:50px;background:#0a0c0f;color:#e8eaf0;">
-      <h2>Verifică abonamentul tău</h2>
-      <form method="GET" action="/check-status">
-        <input name="account" placeholder="Număr cont MT5" style="padding:10px;font-size:16px;border-radius:8px;border:1px solid #1e2330;background:#161a22;color:#e8eaf0;width:250px;">
-        <br><br>
-        <button type="submit" style="padding:12px 24px;background:#00e5a0;color:#000;border:none;border-radius:8px;font-size:16px;font-weight:800;cursor:pointer;">Verifică</button>
-      </form>
-    </body></html>`);
-  }
-  const result = await pool.query('SELECT * FROM licenses WHERE account_id=$1', [account]);
-  const row = result.rows[0];
-  if (!row) return res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:50px;background:#0a0c0f;color:#e8eaf0;"><h1 style="color:#ff3d5a;">❌ Cont negăsit</h1><a href="/check-status" style="color:#00e5a0;">Încearcă din nou</a></body></html>`);
-  const now = new Date();
-  const expiry = new Date(row.expires_at);
-  const daysLeft = Math.ceil((expiry - now) / 86400000);
-  const statusColor = row.status === 'active' ? '#00e5a0' : '#ff3d5a';
-  const statusText = row.status === 'active' ? '✅ Activ' : row.status === 'suspended' ? '⏸ Suspendat' : '❌ Expirat';
-  res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:50px;background:#0a0c0f;color:#e8eaf0;">
-    <h1 style="color:${statusColor};">${statusText}</h1>
-    <div style="background:#161a22;border:1px solid #1e2330;border-radius:16px;padding:32px;max-width:400px;margin:0 auto;">
-      <p><b>Cont MT5:</b> #${row.account_id}</p>
-      <p><b>Expiră:</b> ${row.expires_at}</p>
-      ${row.status === 'active' ? `<p><b>Zile rămase:</b> <span style="color:#00e5a0;font-size:24px;font-weight:800;">${daysLeft}</span></p>` : ''}
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EA Strategies — Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0a0c0f;--surface:#111318;--card:#161a22;--border:#1e2330;--accent:#00e5a0;--accent2:#0066ff;--danger:#ff3d5a;--warn:#ffb800;--text:#e8eaf0;--muted:#5a6070;--mono:'JetBrains Mono',monospace;--sans:'Syne',sans-serif;}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;}
+
+/* NAV */
+nav{position:fixed;top:0;left:0;right:0;z-index:200;background:rgba(10,12,15,0.96);backdrop-filter:blur(12px);border-bottom:1px solid var(--border);padding:0 32px;display:flex;align-items:center;justify-content:space-between;height:56px;}
+.logo{font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text);display:flex;align-items:center;gap:10px;text-decoration:none;}
+.logo-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent);animation:pulse 2s infinite;}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.5;transform:scale(.8);}}
+.nav-r{display:flex;align-items:center;gap:8px;}
+.admin-badge{padding:4px 12px;border-radius:20px;background:rgba(255,184,0,.1);border:1px solid rgba(255,184,0,.3);font-size:11px;font-weight:700;color:var(--warn);letter-spacing:.06em;}
+.btn-logout{padding:7px 16px;background:transparent;color:var(--muted);border:1px solid var(--border);border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--sans);transition:all .2s;}
+.btn-logout:hover{border-color:var(--danger);color:var(--danger);}
+
+/* LOGIN */
+.login-gate{display:flex;align-items:center;justify-content:center;min-height:100vh;}
+.login-box{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:40px;width:100%;max-width:360px;text-align:center;}
+.login-title{font-size:20px;font-weight:600;margin-bottom:6px;}
+.login-sub{font-size:13px;color:var(--muted);margin-bottom:24px;}
+.form-input{width:100%;padding:10px 13px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:13px;outline:none;transition:border-color .2s;margin-bottom:12px;}
+.form-input:focus{border-color:var(--accent);}
+.form-btn{width:100%;padding:13px;background:var(--accent);color:#000;border:none;border-radius:8px;font-family:var(--sans);font-size:13px;font-weight:700;cursor:pointer;transition:all .2s;}
+.form-btn:hover{background:#00ffb3;}
+.form-err{font-size:12px;color:var(--danger);margin-top:8px;display:none;font-family:var(--mono);}
+
+/* MAIN */
+.main{max-width:1100px;margin:0 auto;padding:80px 24px 60px;}
+
+/* TABS */
+.tabs{display:flex;gap:4px;margin-bottom:24px;border-bottom:1px solid var(--border);padding-bottom:0;flex-wrap:wrap;}
+.tab{padding:8px 20px;font-size:12px;font-weight:600;cursor:pointer;color:var(--muted);border:none;background:none;font-family:var(--sans);border-bottom:2px solid transparent;margin-bottom:-1px;transition:all .2s;}
+.tab:hover{color:var(--text);}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent);}
+
+/* METRICS */
+.metrics-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:24px;}
+.metric{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;}
+.metric-lbl{font-size:11px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px;}
+.metric-val{font-size:28px;font-weight:600;color:var(--text);font-family:var(--mono);}
+.metric-sub{font-size:12px;margin-top:4px;}
+.green{color:#1D9E75;}.red{color:var(--danger);}.blue{color:var(--accent2);}.amber{color:var(--warn);}
+
+/* CHART */
+.chart-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px;}
+.chart-title{font-size:12px;font-weight:600;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;margin-bottom:16px;}
+.chart-bars{display:flex;align-items:flex-end;gap:8px;height:100px;}
+.bar-wrap{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;}
+.bar{width:100%;background:#B5D4F4;border-radius:4px 4px 0 0;min-height:4px;transition:height .3s;}
+.bar.curr{background:var(--accent);}
+.bar-lbl{font-size:10px;color:var(--muted);font-family:var(--mono);}
+.bar-val{font-size:10px;color:var(--muted);font-family:var(--mono);}
+
+/* TABLE */
+.table-card{background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:20px;}
+.table-header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);flex-wrap:wrap;gap:10px;}
+.table-title{font-size:12px;font-weight:600;color:var(--muted);letter-spacing:.08em;text-transform:uppercase;}
+.search-input{padding:6px 12px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:12px;outline:none;width:200px;}
+.search-input:focus{border-color:var(--accent);}
+table{width:100%;border-collapse:collapse;font-size:13px;}
+th{text-align:left;padding:10px 16px;color:var(--muted);font-weight:400;font-size:11px;letter-spacing:.06em;text-transform:uppercase;border-bottom:1px solid var(--border);}
+td{padding:12px 16px;border-bottom:1px solid var(--border);color:var(--text);}
+tr:last-child td{border-bottom:none;}
+tr:hover td{background:rgba(255,255,255,.02);}
+.pill{display:inline-block;font-size:10px;padding:2px 8px;border-radius:20px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;}
+.pill-green{background:rgba(0,229,160,.1);color:var(--accent);border:1px solid rgba(0,229,160,.2);}
+.pill-red{background:rgba(255,61,90,.1);color:var(--danger);border:1px solid rgba(255,61,90,.2);}
+.pill-amber{background:rgba(255,184,0,.1);color:var(--warn);border:1px solid rgba(255,184,0,.2);}
+.pill-blue{background:rgba(0,102,255,.1);color:#4d9fff;border:1px solid rgba(0,102,255,.2);}
+.action-btn{padding:4px 10px;border-radius:6px;border:1px solid var(--border);font-size:11px;cursor:pointer;font-family:var(--sans);background:transparent;color:var(--muted);transition:all .2s;margin-right:4px;}
+.action-btn:hover{border-color:var(--accent);color:var(--accent);}
+.action-btn.danger:hover{border-color:var(--danger);color:var(--danger);}
+
+/* FORM CARD */
+.form-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px;}
+.form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:12px;}
+.form-group{display:flex;flex-direction:column;gap:6px;}
+.form-label{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);}
+.form-control{padding:9px 12px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:13px;outline:none;transition:border-color .2s;}
+.form-control:focus{border-color:var(--accent);}
+.btn-primary{padding:10px 20px;background:var(--accent);color:#000;border:none;border-radius:8px;font-family:var(--sans);font-size:12px;font-weight:700;cursor:pointer;transition:all .2s;}
+.btn-primary:hover{background:#00ffb3;}
+.btn-secondary{padding:10px 20px;background:transparent;color:var(--text);border:1px solid var(--border);border-radius:8px;font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer;transition:all .2s;}
+.btn-secondary:hover{border-color:var(--accent);color:var(--accent);}
+.msg-ok{font-size:12px;color:var(--accent);margin-top:8px;display:none;font-family:var(--mono);}
+.msg-err{font-size:12px;color:var(--danger);margin-top:8px;display:none;font-family:var(--mono);}
+
+/* RENEWAL LIST */
+.renewal-item{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--border);}
+.renewal-item:last-child{border-bottom:none;}
+.renewal-name{font-size:13px;font-weight:600;color:var(--text);}
+.renewal-plan{font-size:11px;color:var(--muted);margin-top:2px;}
+.renewal-date{font-size:12px;color:var(--text);font-family:var(--mono);}
+
+/* TWO COL */
+.two-col{display:grid;grid-template-columns:1.6fr 1fr;gap:16px;}
+
+/* MODAL */
+.modal-overlay{display:none;position:fixed;inset:0;z-index:500;background:rgba(0,0,0,.85);backdrop-filter:blur(4px);align-items:center;justify-content:center;padding:20px;}
+.modal-overlay.open{display:flex;}
+.modal{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:24px;width:100%;max-width:600px;max-height:80vh;overflow-y:auto;position:relative;}
+.modal-close{position:absolute;top:12px;right:14px;background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;}
+.modal-title{font-size:16px;font-weight:600;margin-bottom:4px;}
+.modal-sub{font-size:12px;color:var(--muted);margin-bottom:16px;}
+
+/* ─── 🆕 ACTIVITATE LIVE TAB ────────────────────────────────────── */
+.activity-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px;}
+.activity-title-block h2{font-size:16px;font-weight:600;}
+.activity-title-block p{font-size:12px;color:var(--muted);margin-top:4px;}
+.section-label{font-size:10px;color:var(--muted);letter-spacing:.1em;text-transform:uppercase;font-weight:700;margin-bottom:8px;margin-top:20px;}
+.section-label:first-child{margin-top:0;}
+
+.live-metric{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;border-left:3px solid var(--accent);}
+.live-metric.amber{border-left-color:var(--warn);}
+.live-metric.red{border-left-color:var(--danger);}
+.live-metric.blue{border-left-color:var(--accent2);}
+.live-metric.purple{border-left-color:#7F77DD;}
+.live-metric-lbl{font-size:11px;color:var(--muted);margin-bottom:6px;}
+.live-metric-val{font-size:24px;font-weight:600;font-family:var(--mono);}
+.live-metric-sub{font-size:11px;color:var(--muted);margin-top:2px;}
+
+.notif-list{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:20px;}
+.notif-item{display:flex;align-items:flex-start;gap:10px;padding:10px;border-radius:8px;margin-bottom:8px;}
+.notif-item:last-child{margin-bottom:0;}
+.notif-item.warning{background:rgba(255,184,0,.08);border-left:3px solid var(--warn);}
+.notif-item.info{background:rgba(0,102,255,.08);border-left:3px solid var(--accent2);}
+.notif-item.success{background:rgba(0,229,160,.08);border-left:3px solid var(--accent);}
+.notif-emoji{font-size:18px;}
+.notif-content{flex:1;}
+.notif-title{font-size:13px;font-weight:600;color:var(--text);}
+.notif-sub{font-size:11px;color:var(--muted);margin-top:2px;}
+
+.client-row{display:flex;align-items:center;gap:12px;padding:10px;border-radius:8px;cursor:pointer;margin-bottom:6px;transition:all .2s;border:1px solid transparent;}
+.client-row:hover{background:rgba(255,255,255,.03);}
+.client-row.selected{background:rgba(0,229,160,.06);border-color:var(--accent);}
+.client-avatar{width:36px;height:36px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;color:#000;font-weight:700;font-size:13px;font-family:var(--mono);}
+.client-info{flex:1;min-width:0;}
+.client-name{font-size:13px;font-weight:600;color:var(--text);}
+.client-meta{font-size:11px;color:var(--muted);margin-top:2px;}
+
+.ea-bar-row{margin-bottom:12px;}
+.ea-bar-row:last-child{margin-bottom:0;}
+.ea-bar-header{display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;}
+.ea-bar-name{font-weight:600;color:var(--text);}
+.ea-bar-count{color:var(--muted);font-family:var(--mono);font-size:11px;}
+.ea-bar-track{height:6px;background:var(--surface);border-radius:3px;overflow:hidden;}
+.ea-bar-fill{height:100%;background:var(--accent);transition:width .3s;}
+
+.activity-bars{display:flex;align-items:flex-end;justify-content:space-between;height:80px;gap:6px;margin-bottom:8px;}
+.day-bar-wrap{flex:1;display:flex;flex-direction:column;align-items:center;}
+.day-bar{width:100%;background:var(--accent2);border-radius:3px 3px 0 0;min-height:2px;transition:height .3s;}
+.day-bar.empty{background:var(--surface);}
+.day-bar-lbl{font-size:10px;color:var(--muted);margin-top:4px;font-family:var(--mono);}
+
+@media(max-width:768px){nav{padding:0 16px;}.main{padding:72px 16px 40px;}.two-col{grid-template-columns:1fr;}.metrics-grid{grid-template-columns:1fr 1fr;}}
+</style>
+</head>
+<body>
+
+<nav>
+  <a href="/landing" class="logo"><div class="logo-dot"></div><span>EA Strategies</span></a>
+  <div class="nav-r">
+    <span class="admin-badge">⚡ Admin</span>
+    <button class="btn-logout" onclick="doLogout()">Ieși</button>
+  </div>
+</nav>
+
+<div class="main">
+
+  <!-- LOGIN -->
+  <div id="viewLogin" class="login-gate">
+    <div class="login-box">
+      <div class="login-title">🔐 Admin Access</div>
+      <div class="login-sub">Introdu cheia de admin pentru acces</div>
+      <input class="form-input" type="password" id="adminKey" placeholder="Cheia admin..." onkeydown="if(event.key==='Enter')doLogin()">
+      <div class="form-err" id="loginErr">Cheie incorectă!</div>
+      <button class="form-btn" onclick="doLogin()">Intră</button>
     </div>
-    <br><a href="/check-status" style="color:#00e5a0;">Verifică alt cont</a>
-  </body></html>`);
-});
+  </div>
 
-// ─── Admin Endpoints ──────────────────────────────────────────────────────────
-app.post('/admin/license', adminAuth, async (req, res) => {
-  const { account_id, email, months = 1, plan = 'monthly', notes } = req.body;
-  if (!account_id) return res.status(400).json({ error: 'account_id required' });
-  const existing = await pool.query('SELECT * FROM licenses WHERE account_id=$1', [account_id]);
-  const row = existing.rows[0];
-  let expiresAt;
-  if (row && row.status === 'active') {
-    const base = new Date(row.expires_at);
-    base.setDate(base.getDate() + (parseInt(months) * 30));
-    expiresAt = base.toISOString().split('T')[0];
-  } else {
-    const base = new Date();
-    base.setDate(base.getDate() + (parseInt(months) * 30));
-    expiresAt = base.toISOString().split('T')[0];
-  }
-  await pool.query(`
-    INSERT INTO licenses (account_id, email, plan, status, expires_at, notes)
-    VALUES ($1,$2,$3,'active',$4,$5)
-    ON CONFLICT(account_id) DO UPDATE SET
-      email=excluded.email, plan=excluded.plan,
-      status='active', expires_at=excluded.expires_at, notes=excluded.notes
-  `, [account_id, email, plan, expiresAt, notes]);
-  await sendTelegram(`✅ <b>Licență adăugată manual!</b>\n👤 Cont: <b>#${account_id}</b>\n📧 Email: ${email || 'nespecificat'}\n📦 Plan: ${plan}\n📅 Expiră: ${expiresAt}`);
-  res.json({ success: true, account_id, expires_at: expiresAt, months_added: months });
-});
+  <!-- DASHBOARD -->
+  <div id="viewDashboard" style="display:none">
 
-app.post('/admin/payment-link', adminAuth, async (req, res) => {
-  const { account_id, email, months = 1 } = req.body;
-  if (!account_id) return res.status(400).json({ error: 'account_id required' });
+    <div class="tabs">
+      <button class="tab active" onclick="showTab('overview',this)">📊 Overview</button>
+      <button class="tab" onclick="showTab('clients',this)">👥 Clienți</button>
+      <button class="tab" onclick="showTab('abuse',this)">🚨 Abuzuri</button>
+      <button class="tab" onclick="showTab('add',this)">➕ Adaugă licență</button>
+      <button class="tab" onclick="showTab('discord',this)">💬 Discord</button>
+      <button class="tab" onclick="showTab('activity',this)">📡 Activitate Live</button>
+    </div>
+
+    <!-- OVERVIEW TAB -->
+    <div id="tab-overview">
+      <div class="metrics-grid">
+        <div class="metric"><div class="metric-lbl">Clienți activi</div><div class="metric-val" id="mActive">—</div><div class="metric-sub green" id="mActiveSub"></div></div>
+        <div class="metric"><div class="metric-lbl">Revenue lunar est.</div><div class="metric-val" id="mRevenue">—</div><div class="metric-sub green">abonamente active</div></div>
+        <div class="metric"><div class="metric-lbl">Expiră în 7 zile</div><div class="metric-val" id="mExpiring">—</div><div class="metric-sub red" id="mExpiringSub"></div></div>
+        <div class="metric"><div class="metric-lbl">Total licențe</div><div class="metric-val" id="mTotal">—</div><div class="metric-sub" style="color:var(--muted)" id="mTotalSub"></div></div>
+      </div>
+
+      <div class="two-col">
+        <div class="chart-card">
+          <div class="chart-title">Revenue simulat pe luni</div>
+          <div class="chart-bars">
+            <div class="bar-wrap"><div class="bar-val">€290</div><div class="bar" style="height:35%"></div><div class="bar-lbl">Dec</div></div>
+            <div class="bar-wrap"><div class="bar-val">€320</div><div class="bar" style="height:39%"></div><div class="bar-lbl">Ian</div></div>
+            <div class="bar-wrap"><div class="bar-val">€370</div><div class="bar" style="height:45%"></div><div class="bar-lbl">Feb</div></div>
+            <div class="bar-wrap"><div class="bar-val">€410</div><div class="bar" style="height:50%"></div><div class="bar-lbl">Mar</div></div>
+            <div class="bar-wrap"><div class="bar-val">€430</div><div class="bar" style="height:52%"></div><div class="bar-lbl">Apr</div></div>
+            <div class="bar-wrap"><div class="bar-val">€548</div><div class="bar curr" style="height:67%"></div><div class="bar-lbl">Mai</div></div>
+          </div>
+        </div>
+
+        <div class="chart-card">
+          <div class="chart-title">Reînnoiri în 7 zile</div>
+          <div id="renewalList"><div style="font-size:13px;color:var(--muted);">Se încarcă...</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CLIENTS TAB -->
+    <div id="tab-clients" style="display:none">
+      <div class="table-card">
+        <div class="table-header">
+          <div class="table-title">Toți clienții</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input class="search-input" type="text" id="searchInput" placeholder="Caută..." oninput="filterClients()">
+            <button class="btn-secondary" onclick="loadClients()" style="padding:6px 14px;font-size:11px">↻ Refresh</button>
+            <button class="btn-primary" onclick="exportCSV()" style="padding:6px 14px;font-size:11px">⬇ CSV</button>
+            <button class="btn-secondary" onclick="generateAdminPDF()" style="padding:6px 14px;font-size:11px;color:#00e5a0;border-color:#00e5a0">📄 PDF Raport</button>
+          </div>
+        </div>
+        <div style="overflow-x:auto">
+          <table>
+            <thead>
+              <tr>
+                <th>Cont MT5</th>
+                <th>Email</th>
+                <th>Plan</th>
+                <th>Sumă</th>
+                <th>Status</th>
+                <th>Expiră</th>
+                <th>Note</th>
+                <th>Acțiuni</th>
+              </tr>
+            </thead>
+            <tbody id="clientsTable">
+              <tr><td colspan="7" style="text-align:center;color:var(--muted);padding:24px">Se încarcă...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 🆕 ABUSE TAB -->
+    <div id="tab-abuse" style="display:none">
+      <div class="metrics-grid" id="abuseMetrics">
+        <div class="metric"><div class="metric-lbl">🔴 Risc înalt</div><div class="metric-val red" id="abuseHigh">—</div><div class="metric-sub" style="color:var(--muted)">3x+ peste limită</div></div>
+        <div class="metric"><div class="metric-lbl">🟡 Risc mediu</div><div class="metric-val amber" id="abuseMed">—</div><div class="metric-sub" style="color:var(--muted)">2x peste limită</div></div>
+        <div class="metric"><div class="metric-lbl">🟢 Risc scăzut</div><div class="metric-val green" id="abuseLow">—</div><div class="metric-sub" style="color:var(--muted)">normal</div></div>
+        <div class="metric"><div class="metric-lbl">Total schimbări</div><div class="metric-val" id="abuseRemoved">—</div><div class="metric-sub" style="color:var(--muted)">conturi șterse</div></div>
+      </div>
+
+      <div class="table-card">
+        <div class="table-header">
+          <div class="table-title">📋 Comportament clienți — schimbări conturi MT5</div>
+          <button class="btn-secondary" onclick="loadAbuse()" style="padding:6px 14px;font-size:11px">↻ Refresh</button>
+        </div>
+        <div style="overflow-x:auto">
+          <table>
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Plan</th>
+                <th>Limită</th>
+                <th>Total folosite</th>
+                <th>Active</th>
+                <th>Șterse</th>
+                <th>Risc</th>
+                <th>Acțiuni</th>
+              </tr>
+            </thead>
+            <tbody id="abuseTable">
+              <tr><td colspan="8" style="text-align:center;color:var(--muted);padding:24px">Se încarcă...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;font-size:12px;color:var(--muted);line-height:1.6">
+        <b style="color:var(--text)">💡 Cum interpretezi:</b><br>
+        🟢 <b>Scăzut</b> = clientul folosește mai puțin sau exact cât are voie.<br>
+        🟡 <b>Mediu</b> = a folosit ~2x conturi mai multe decât plan permite (poate să schimbat o dată).<br>
+        🔴 <b>Înalt</b> = a folosit 3x+ conturi mai multe — investighează manual!
+      </div>
+    </div>
+
+    <!-- ADD LICENSE TAB -->
+    <div id="tab-add" style="display:none">
+      <div class="form-card">
+        <div class="chart-title">Adaugă / Reînnoiește licență</div>
+        <div class="form-grid">
+          <div class="form-group"><label class="form-label">Cont MT5 *</label><input class="form-control" type="text" id="addAccount" placeholder="ex: 12345678"></div>
+          <div class="form-group"><label class="form-label">Email</label><input class="form-control" type="email" id="addEmail" placeholder="client@email.com"></div>
+          <div class="form-group"><label class="form-label">Luni</label><select class="form-control" id="addMonths"><option value="1">1 lună</option><option value="3">3 luni</option><option value="6">6 luni</option><option value="12">12 luni</option></select></div>
+          <div class="form-group"><label class="form-label">Plan</label><select class="form-control" id="addPlan"><option value="basic">Basic</option><option value="pro">Pro</option><option value="full">Full Access</option></select></div>
+        </div>
+        <div class="form-group" style="margin-bottom:12px"><label class="form-label">Note</label><input class="form-control" type="text" id="addNotes" placeholder="Optional..."></div>
+        <div style="display:flex;gap:8px">
+          <button class="btn-primary" onclick="addLicense()">✅ Adaugă licență</button>
+          <button class="btn-secondary" onclick="generatePayLink()">🔗 Generează link plată</button>
+        </div>
+        <div class="msg-ok" id="addOk"></div>
+        <div class="msg-err" id="addErr"></div>
+      </div>
+
+      <div class="form-card">
+        <div class="chart-title">Link plată generat</div>
+        <div id="payLinkBox" style="font-family:var(--mono);font-size:12px;color:var(--muted);padding:12px;background:var(--surface);border-radius:8px;word-break:break-all;">
+          Completează formularul de sus și apasă "Generează link plată"
+        </div>
+      </div>
+    </div>
+
+    <!-- DISCORD TAB -->
+    <div id="tab-discord" style="display:none">
+      <div class="form-card">
+        <div class="chart-title">Gestionare roluri Discord</div>
+        <div class="form-grid">
+          <div class="form-group"><label class="form-label">Email client</label><input class="form-control" type="email" id="discordEmail" placeholder="client@email.com"></div>
+          <div class="form-group"><label class="form-label">Plan / Rol</label><select class="form-control" id="discordPlan"><option value="basic">Basic</option><option value="pro">Pro</option><option value="full">Full Access</option></select></div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:4px">
+          <button class="btn-primary" onclick="addDiscordRole()">➕ Adaugă rol</button>
+          <button class="btn-secondary" onclick="removeDiscordRole()" style="color:var(--danger);border-color:var(--danger)">➖ Șterge rol</button>
+        </div>
+        <div class="msg-ok" id="discordOk"></div>
+        <div class="msg-err" id="discordErr"></div>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-title">Info Discord Bot</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px">
+          <div style="background:var(--surface);border-radius:8px;padding:12px"><div style="color:var(--muted);font-size:11px;margin-bottom:4px">SERVER ID</div><div style="font-family:var(--mono)">1500420643290615918</div></div>
+          <div style="background:var(--surface);border-radius:8px;padding:12px"><div style="color:var(--muted);font-size:11px;margin-bottom:4px">ROL BASIC</div><div style="font-family:var(--mono)">1503110227438993469</div></div>
+          <div style="background:var(--surface);border-radius:8px;padding:12px"><div style="color:var(--muted);font-size:11px;margin-bottom:4px">ROL PRO</div><div style="font-family:var(--mono)">1503110421740257471</div></div>
+          <div style="background:var(--surface);border-radius:8px;padding:12px"><div style="color:var(--muted);font-size:11px;margin-bottom:4px">ROL FULL ACCESS</div><div style="font-family:var(--mono)">1503108475495125033</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 🆕 ACTIVITATE LIVE TAB -->
+    <div id="tab-activity" style="display:none">
+      <div class="activity-header">
+        <div class="activity-title-block">
+          <h2>📡 Monitor activitate EA-uri</h2>
+          <p id="activityLastUpdate">Se încarcă datele...</p>
+        </div>
+        <button class="btn-secondary" onclick="loadActivityMonitor()" style="padding:8px 16px;font-size:12px">↻ Actualizează</button>
+      </div>
+
+      <!-- Sumar status -->
+      <div class="section-label">📊 Sumar status clienți</div>
+      <div class="metrics-grid">
+        <div class="live-metric">
+          <div class="live-metric-lbl">🟢 Activi acum</div>
+          <div class="live-metric-val" id="actActive">—</div>
+          <div class="live-metric-sub">ultimele 2 ore</div>
+        </div>
+        <div class="live-metric amber">
+          <div class="live-metric-lbl">🟡 Inactivi</div>
+          <div class="live-metric-val" id="actInactive">—</div>
+          <div class="live-metric-sub">24-48h fără check-in</div>
+        </div>
+        <div class="live-metric red">
+          <div class="live-metric-lbl">🛡️ Erori azi</div>
+          <div class="live-metric-val" id="actErrors">—</div>
+          <div class="live-metric-sub">ultimele 24h</div>
+        </div>
+        <div class="live-metric blue">
+          <div class="live-metric-lbl">📊 Total clienți</div>
+          <div class="live-metric-val" id="actTotal">—</div>
+          <div class="live-metric-sub">cu abonament activ</div>
+        </div>
+      </div>
+
+      <!-- Distribuție planuri -->
+      <div class="section-label">💰 Distribuție planuri</div>
+      <div class="chart-card">
+        <div id="planDistribution">
+          <div style="font-size:13px;color:var(--muted);">Se încarcă...</div>
+        </div>
+      </div>
+
+      <!-- Notificări -->
+      <div class="section-label">🔔 Notificări importante</div>
+      <div class="notif-list" id="notifList">
+        <div style="font-size:13px;color:var(--muted);text-align:center;padding:8px">Se încarcă...</div>
+      </div>
+
+      <!-- Lista clienți -->
+      <div class="section-label">👥 Clienți activi</div>
+      <div class="chart-card" id="clientsActivityList">
+        <div style="font-size:13px;color:var(--muted);text-align:center;padding:8px">Se încarcă...</div>
+      </div>
+
+      <!-- Top EA-uri + Activitate săptămânală -->
+      <div class="two-col" style="margin-top:8px">
+        <div class="chart-card">
+          <div class="chart-title">🏆 Top EA-uri (7 zile)</div>
+          <div id="topEasList">
+            <div style="font-size:13px;color:var(--muted);">Se încarcă...</div>
+          </div>
+        </div>
+
+        <div class="chart-card">
+          <div class="chart-title">📈 Activitate săptămânală</div>
+          <div id="weeklyChart">
+            <div style="font-size:13px;color:var(--muted);">Se încarcă...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Conturi MT5 active -->
+      <div class="section-label">🗺️ Conturi MT5 active</div>
+      <div class="table-card">
+        <div style="overflow-x:auto">
+          <table>
+            <thead>
+              <tr>
+                <th>Email Client</th>
+                <th>Cont MT5</th>
+                <th>Broker</th>
+                <th>Plan</th>
+                <th>Adăugat</th>
+              </tr>
+            </thead>
+            <tbody id="mt5AccountsTable">
+              <tr><td colspan="5" style="text-align:center;color:var(--muted);padding:24px">Se încarcă...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Ultimele check-in-uri -->
+      <div class="section-label">📋 Ultimele check-in-uri</div>
+      <div class="table-card">
+        <div style="overflow-x:auto">
+          <table>
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>EA</th>
+                <th>Cont MT5</th>
+                <th>Status</th>
+                <th>Când</th>
+              </tr>
+            </thead>
+            <tbody id="recentCheckinsTable">
+              <tr><td colspan="5" style="text-align:center;color:var(--muted);padding:24px">Se încarcă...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- 🆕 MODAL ISTORIC CONTURI -->
+<div class="modal-overlay" id="historyModal" onclick="closeHistoryModal(event)">
+  <div class="modal">
+    <button class="modal-close" onclick="closeHistoryModal()">✕</button>
+    <div class="modal-title" id="historyTitle">Istoric conturi MT5</div>
+    <div class="modal-sub" id="historySub">Toate conturile folosite de acest client</div>
+    <div id="historyContent" style="font-size:13px;">Se încarcă...</div>
+  </div>
+</div>
+
+<script>
+const SERVER = 'https://ea-license-server-lrsl.onrender.com';
+let ADMIN_KEY = '';
+let allClients = [];
+let allAbuse = [];
+
+function doLogin(){
+  const key = document.getElementById('adminKey').value.trim();
+  if (!key){ showErr('loginErr','Introdu cheia!'); return; }
+  ADMIN_KEY = key;
+  fetch(SERVER+'/admin/licenses', { headers:{ 'x-admin-key': key } })
+    .then(r => {
+      if(r.ok){ sessionStorage.setItem('ea_admin_key', key); showDashboard(); }
+      else { showErr('loginErr','Cheie incorectă!'); ADMIN_KEY=''; }
+    })
+    .catch(() => showErr('loginErr','Eroare conexiune server.'));
+}
+
+function doLogout(){
+  sessionStorage.removeItem('ea_admin_key');
+  ADMIN_KEY='';
+  document.getElementById('viewLogin').style.display='flex';
+  document.getElementById('viewDashboard').style.display='none';
+}
+
+function showDashboard(){
+  document.getElementById('viewLogin').style.display='none';
+  document.getElementById('viewDashboard').style.display='block';
+  loadAll();
+}
+
+function showTab(id, el){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  ['overview','clients','abuse','add','discord','activity'].forEach(t=>{
+    document.getElementById('tab-'+t).style.display = t===id ? 'block' : 'none';
+  });
+  if(id==='clients') loadClients();
+  if(id==='abuse') loadAbuse();
+  if(id==='activity') loadActivityMonitor();
+}
+
+async function loadAll(){
+  await loadClients();
+  updateMetrics();
+  updateRenewals();
+}
+
+async function loadClients(){
   try {
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ['card'],
-      mode: 'subscription',
-      customer_email: email || undefined,
-      line_items: [{ price: process.env.STRIPE_PRICE_ID, quantity: parseInt(months) }],
-      metadata: { account_id, months: String(months), email: email || '' },
-      success_url: 'https://ea-license-server-lrsl.onrender.com/payment-success',
-      cancel_url:  'https://ea-license-server-lrsl.onrender.com/payment-cancel',
-    });
-    res.json({ url: session.url });
-  } catch(e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.patch('/admin/license/:account_id/suspend', adminAuth, async (req, res) => {
-  const { account_id } = req.params;
-  const r = await pool.query("UPDATE licenses SET status='suspended' WHERE account_id=$1", [account_id]);
-  if (r.rowCount === 0) return res.status(404).json({ error: 'Not found' });
-  await sendTelegram(`⏸ <b>Licență suspendată!</b>\n👤 Cont: <b>#${account_id}</b>`);
-  res.json({ success: true, account_id, status: 'suspended' });
-});
-
-app.patch('/admin/license/:account_id/activate', adminAuth, async (req, res) => {
-  const { account_id } = req.params;
-  await pool.query("UPDATE licenses SET status='active' WHERE account_id=$1", [account_id]);
-  await sendTelegram(`✅ <b>Licență reactivată!</b>\n👤 Cont: <b>#${account_id}</b>`);
-  res.json({ success: true, account_id, status: 'active' });
-});
-
-app.delete('/admin/license/:account_id', adminAuth, async (req, res) => {
-  await pool.query('DELETE FROM licenses WHERE account_id=$1', [req.params.account_id]);
-  res.json({ success: true });
-});
-
-app.get('/admin/licenses', adminAuth, async (req, res) => {
-  const result = await pool.query('SELECT * FROM licenses ORDER BY expires_at ASC');
-  res.json(result.rows);
-});
-
-// ─── 🆕 ACTIVITATE LIVE: Monitor pentru tab-ul nou din admin ──────────────────
-// Returnează toate datele necesare pentru dashboard-ul Activitate Live
-// Citește din: access_log_v2, users, subscriptions, ea_licenses, mt5_accounts
-app.get('/admin/activity-monitor', adminAuth, async (req, res) => {
-  try {
-    // 1. Sumar status clienți (activi/inactivi/dispăruți/erori azi)
-    const summaryQuery = await pool.query(`
-      SELECT
-        (SELECT COUNT(DISTINCT user_id) FROM access_log_v2 
-         WHERE checked_at > NOW() - INTERVAL '2 hours' AND result = 'VALID_NEW' AND user_id IS NOT NULL) AS active_now,
-        (SELECT COUNT(DISTINCT user_id) FROM access_log_v2 
-         WHERE user_id IS NOT NULL AND result = 'VALID_NEW' 
-         AND user_id NOT IN (
-           SELECT DISTINCT user_id FROM access_log_v2 
-           WHERE checked_at > NOW() - INTERVAL '24 hours' AND user_id IS NOT NULL
-         )
-         AND user_id IN (
-           SELECT DISTINCT user_id FROM access_log_v2 
-           WHERE checked_at > NOW() - INTERVAL '48 hours' AND user_id IS NOT NULL
-         )
-        ) AS inactive_24_48h,
-        (SELECT COUNT(*) FROM access_log_v2 
-         WHERE checked_at > NOW() - INTERVAL '24 hours' AND result != 'VALID_NEW' AND result != 'VALID_OLD' AND result != 'DOWNLOAD') AS errors_today
-    `);
-
-    // 2. Sumar financiar (clienți activi + venit)
-    const financialQuery = await pool.query(`
-      SELECT 
-        COUNT(*) AS total_active,
-        COUNT(CASE WHEN plan = 'basic' THEN 1 END) AS basic_count,
-        COUNT(CASE WHEN plan = 'pro' THEN 1 END) AS pro_count,
-        COUNT(CASE WHEN plan = 'full_access' THEN 1 END) AS full_count,
-        COUNT(CASE WHEN current_period_end < NOW() + INTERVAL '7 days' AND current_period_end > NOW() THEN 1 END) AS expiring_soon
-      FROM subscriptions
-      WHERE status = 'active'
-    `);
-
-    // 3. Lista clienți cu status (pentru lista de selectare)
-    const clientsListQuery = await pool.query(`
-      SELECT 
-        u.id AS user_id,
-        u.email,
-        u.discord_username,
-        s.plan,
-        s.status,
-        s.current_period_end,
-        s.max_mt5_accounts,
-        (SELECT MAX(checked_at) FROM access_log_v2 WHERE user_id = u.id AND result = 'VALID_NEW') AS last_checkin,
-        (SELECT COUNT(*) FROM ea_licenses WHERE user_id = u.id AND status = 'active') AS active_eas_count,
-        (SELECT COUNT(*) FROM mt5_accounts WHERE user_id = u.id AND is_active = true) AS active_accounts_count
-      FROM users u
-      LEFT JOIN subscriptions s ON s.user_id = u.id
-      WHERE s.status IS NOT NULL
-      ORDER BY s.current_period_end DESC NULLS LAST
-    `);
-
-    // 4. Top EA-uri în ultimele 7 zile
-    const topEasQuery = await pool.query(`
-      SELECT 
-        ea_name,
-        COUNT(*) AS checkins_count,
-        COUNT(DISTINCT account_number) AS unique_accounts
-      FROM access_log_v2
-      WHERE checked_at > NOW() - INTERVAL '7 days'
-        AND result = 'VALID_NEW'
-        AND ea_name IS NOT NULL
-      GROUP BY ea_name
-      ORDER BY checkins_count DESC
-      LIMIT 6
-    `);
-
-    // 5. Activitate săptămânală (ultimele 7 zile, grupată pe zile)
-    const weeklyActivityQuery = await pool.query(`
-      SELECT 
-        DATE(checked_at AT TIME ZONE 'Europe/Bucharest') AS day,
-        COUNT(*) AS checkins,
-        COUNT(DISTINCT account_number) AS unique_accounts
-      FROM access_log_v2
-      WHERE checked_at > NOW() - INTERVAL '7 days'
-        AND result = 'VALID_NEW'
-      GROUP BY DATE(checked_at AT TIME ZONE 'Europe/Bucharest')
-      ORDER BY day ASC
-    `);
-
-    // 6. Ultimele check-in-uri (10 recente)
-    const recentCheckinsQuery = await pool.query(`
-      SELECT 
-        l.user_id,
-        u.email,
-        l.ea_name,
-        l.account_number,
-        l.result,
-        l.hmac_valid,
-        l.checked_at
-      FROM access_log_v2 l
-      LEFT JOIN users u ON u.id = l.user_id
-      WHERE l.result = 'VALID_NEW'
-      ORDER BY l.checked_at DESC
-      LIMIT 10
-    `);
-
-    // 7. Conturi MT5 active (mapă brokeri)
-    const mt5AccountsQuery = await pool.query(`
-      SELECT 
-        m.account_number,
-        m.broker,
-        m.added_at,
-        u.email,
-        s.plan
-      FROM mt5_accounts m
-      JOIN users u ON u.id = m.user_id
-      LEFT JOIN subscriptions s ON s.id = m.subscription_id
-      WHERE m.is_active = true
-      ORDER BY m.added_at DESC
-    `);
-
-    res.json({
-      summary: summaryQuery.rows[0],
-      financial: financialQuery.rows[0],
-      clients: clientsListQuery.rows,
-      top_eas: topEasQuery.rows,
-      weekly_activity: weeklyActivityQuery.rows,
-      recent_checkins: recentCheckinsQuery.rows,
-      mt5_accounts: mt5AccountsQuery.rows,
-      generated_at: new Date().toISOString()
-    });
-  } catch (e) {
-    console.error('Activity monitor error:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ─── 🆕 FAZA 2: EXTINDERE ABONAMENT GRATUIT ──────────────────────────────────
-
-// Helper: Actualizează billing_cycle_anchor în Stripe cu proration_behavior='none'
-// Asta înseamnă: Stripe AMÂNĂ data următoarei facturări, FĂRĂ să genereze ajustări
-async function updateStripeBillingAnchor(stripeSubId, newPeriodEnd) {
-  if (!stripeSubId) return { synced: false, error: 'no_stripe_subscription' };
-  try {
-    const trialEndUnix = Math.floor(new Date(newPeriodEnd).getTime() / 1000);
-    // trial_end mută anchor-ul în viitor FĂRĂ proration
-    // (alternativă mai sigură decât billing_cycle_anchor direct)
-    const updated = await stripe.subscriptions.update(stripeSubId, {
-      trial_end: trialEndUnix,
-      proration_behavior: 'none'
-    });
-    console.log(`✅ Stripe billing anchor actualizat: ${stripeSubId} → ${newPeriodEnd}`);
-    return { synced: true, stripe_status: updated.status };
-  } catch (e) {
-    console.error('Stripe billing anchor error:', e.message);
-    return { synced: false, error: e.message };
+    const r = await fetch(SERVER+'/admin/licenses', { headers:{ 'x-admin-key': ADMIN_KEY } });
+    allClients = await r.json();
+    renderClients(allClients);
+    updateMetrics();
+    updateRenewals();
+  } catch(e){
+    document.getElementById('clientsTable').innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--danger)">Eroare la încărcare!</td></tr>';
   }
 }
 
-// POST /admin/extend-subscription
-// Body: { user_id, days, reason_tag, reason_notes, sync_stripe (bool, default true) }
-app.post('/admin/extend-subscription', adminAuth, async (req, res) => {
-  const { user_id, days, reason_tag, reason_notes, sync_stripe = true } = req.body;
-
-  // Validări
-  if (!user_id || !days || !reason_tag) {
-    return res.status(400).json({ error: 'user_id, days și reason_tag sunt obligatorii' });
-  }
-  const daysInt = parseInt(days);
-  if (isNaN(daysInt) || daysInt < 1 || daysInt > 365) {
-    return res.status(400).json({ error: 'days trebuie între 1 și 365' });
-  }
-  const validTags = ['compensation', 'loyalty', 'gift', 'friend_bonus', 'apology', 'other'];
-  if (!validTags.includes(reason_tag)) {
-    return res.status(400).json({ error: 'reason_tag invalid', valid: validTags });
-  }
-
+// 🆕 ABUSE FUNCTIONS
+async function loadAbuse(){
   try {
-    // 1. Iau subscription-ul curent
-    const subQuery = await pool.query(
-      `SELECT s.*, u.email, u.discord_user_id 
-       FROM subscriptions s 
-       JOIN users u ON u.id = s.user_id 
-       WHERE s.user_id = $1 AND s.status IN ('active', 'grace_period')
-       ORDER BY s.id DESC LIMIT 1`,
-      [user_id]
-    );
-    if (subQuery.rows.length === 0) {
-      return res.status(404).json({ error: 'Nu am găsit abonament activ pentru acest user' });
-    }
-    const sub = subQuery.rows[0];
-    const oldPeriodEnd = sub.current_period_end ? new Date(sub.current_period_end) : new Date();
-    const newPeriodEnd = new Date(oldPeriodEnd);
-    newPeriodEnd.setDate(newPeriodEnd.getDate() + daysInt);
-
-    // 2. Sincronizare Stripe (dacă există subscription Stripe + sync activat)
-    let stripeSyncResult = { synced: false, error: 'sync_disabled' };
-    if (sync_stripe && sub.stripe_subscription_id && !sub.is_trial) {
-      stripeSyncResult = await updateStripeBillingAnchor(
-        sub.stripe_subscription_id,
-        newPeriodEnd.toISOString()
-      );
-    }
-
-    // 3. Actualizez DB
-    await pool.query(
-      `UPDATE subscriptions 
-       SET current_period_end = $1, status = 'active', grace_period_until = NULL 
-       WHERE id = $2`,
-      [newPeriodEnd.toISOString(), sub.id]
-    );
-
-    // 4. Actualizez ea_licenses expires_at
-    await pool.query(
-      `UPDATE ea_licenses SET expires_at = $1 WHERE user_id = $2 AND status IN ('active', 'expired')`,
-      [newPeriodEnd.toISOString(), user_id]
-    );
-
-    // 5. Update și tabela veche licenses (backwards compat)
-    if (sub.email) {
-      const legacyDate = newPeriodEnd.toISOString().split('T')[0];
-      await pool.query(
-        `UPDATE licenses SET expires_at = $1, status = 'active' WHERE email = $2`,
-        [legacyDate, sub.email]
-      );
-    }
-
-    // 6. Loghez în manual_extensions
-    const extLog = await pool.query(
-      `INSERT INTO manual_extensions 
-       (user_id, subscription_id, days_added, reason_tag, reason_notes, 
-        old_period_end, new_period_end, stripe_synced, stripe_error) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-      [user_id, sub.id, daysInt, reason_tag, reason_notes || null,
-       oldPeriodEnd.toISOString(), newPeriodEnd.toISOString(),
-       stripeSyncResult.synced, stripeSyncResult.error || null]
-    );
-
-    // 7. Telegram
-    const reasonLabels = {
-      compensation: 'Compensare', loyalty: 'Loialitate', gift: 'Cadou',
-      friend_bonus: 'Prieten/Bonus', apology: 'Scuze', other: 'Altul'
-    };
-    await sendTelegram(
-      `🎁 <b>Extindere gratuită acordată</b>\n` +
-      `📧 ${sub.email}\n` +
-      `➕ ${daysInt} zile gratis\n` +
-      `📌 Motiv: ${reasonLabels[reason_tag]}\n` +
-      `📅 Nouă expirare: ${newPeriodEnd.toISOString().split('T')[0]}\n` +
-      `💳 Stripe sync: ${stripeSyncResult.synced ? '✅ OK' : '⚠️ ' + (stripeSyncResult.error || 'eșuat')}` +
-      (reason_notes ? `\n📝 Note: ${reason_notes}` : '')
-    );
-
-    // 8. DM Discord pentru client (opțional, dacă are Discord)
-    if (sub.discord_user_id && discordClient.isReady()) {
-      try {
-        const guild = await discordClient.guilds.fetch(DISCORD_GUILD_ID);
-        const member = await guild.members.fetch(sub.discord_user_id).catch(() => null);
-        if (member) {
-          await member.send(
-            `🎁 **Surpriză!** Ai primit **${daysInt} zile gratuite** la abonamentul tău EA Strategies! ` +
-            `Noua dată de expirare: **${newPeriodEnd.toISOString().split('T')[0]}**. Mulțumim că ești cu noi! 🚀`
-          );
-        }
-      } catch (e) { /* DM eșuat */ }
-    }
-
-    res.json({
-      success: true,
-      extension_id: extLog.rows[0].id,
-      old_period_end: oldPeriodEnd.toISOString(),
-      new_period_end: newPeriodEnd.toISOString(),
-      days_added: daysInt,
-      stripe_synced: stripeSyncResult.synced,
-      stripe_error: stripeSyncResult.error || null
-    });
-  } catch (e) {
-    console.error('Extend subscription error:', e.message);
-    res.status(500).json({ error: e.message });
+    const r = await fetch(SERVER+'/admin/abuse-report', { headers:{ 'x-admin-key': ADMIN_KEY } });
+    allAbuse = await r.json();
+    renderAbuse(allAbuse);
+    updateAbuseMetrics();
+  } catch(e){
+    document.getElementById('abuseTable').innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--danger)">Eroare la încărcare!</td></tr>';
   }
-});
+}
 
-// GET /admin/extensions-log
-// Returnează jurnalul complet al extinderilor (cu filtru optional ?user_id=X)
-app.get('/admin/extensions-log', adminAuth, async (req, res) => {
-  try {
-    const { user_id } = req.query;
-    let query, params;
-    if (user_id) {
-      query = `
-        SELECT me.*, u.email 
-        FROM manual_extensions me 
-        LEFT JOIN users u ON u.id = me.user_id 
-        WHERE me.user_id = $1 
-        ORDER BY me.created_at DESC LIMIT 100`;
-      params = [user_id];
-    } else {
-      query = `
-        SELECT me.*, u.email 
-        FROM manual_extensions me 
-        LEFT JOIN users u ON u.id = me.user_id 
-        ORDER BY me.created_at DESC LIMIT 100`;
-      params = [];
-    }
-    const r = await pool.query(query, params);
-    res.json(r.rows);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
+function renderAbuse(rows){
+  const tbody = document.getElementById('abuseTable');
+  if(!rows.length){ 
+    tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:24px">✅ Niciun client cu conturi MT5</td></tr>'; 
+    return; 
   }
-});
-
-// ─── 🆕 FAZA 3: TRIAL GRATUIT PENTRU PRIETENI ────────────────────────────────
-
-// POST /admin/create-trial
-// Body: { email, plan, days, trial_source, trial_notes, mt5_account (optional), ea_names (optional array) }
-app.post('/admin/create-trial', adminAuth, async (req, res) => {
-  const { 
-    email, plan, days, trial_source, trial_notes, 
-    mt5_account, ea_names 
-  } = req.body;
-
-  // Validări
-  if (!email || !plan || !days || !trial_source) {
-    return res.status(400).json({ 
-      error: 'email, plan, days și trial_source sunt obligatorii' 
-    });
-  }
-  const daysInt = parseInt(days);
-  if (isNaN(daysInt) || daysInt < 1 || daysInt > 365) {
-    return res.status(400).json({ error: 'days trebuie între 1 și 365' });
-  }
-  const validPlans = ['basic', 'pro', 'full_access'];
-  if (!validPlans.includes(plan)) {
-    return res.status(400).json({ error: 'plan invalid', valid: validPlans });
-  }
-  const validSources = ['friend', 'influencer', 'tester', 'demo', 'other'];
-  if (!validSources.includes(trial_source)) {
-    return res.status(400).json({ error: 'trial_source invalid', valid: validSources });
-  }
-
-  const emailNorm = email.trim().toLowerCase();
-
-  try {
-    // 1. Verific dacă există deja user cu acest email
-    let userId;
-    const existingUser = await pool.query('SELECT id FROM users WHERE LOWER(email) = $1', [emailNorm]);
+  tbody.innerHTML = rows.map(r => {
+    let riskPill;
+    if(r.risk_level === 'high') riskPill = '<span class="pill pill-red">🔴 Înalt</span>';
+    else if(r.risk_level === 'medium') riskPill = '<span class="pill pill-amber">🟡 Mediu</span>';
+    else riskPill = '<span class="pill pill-green">🟢 Scăzut</span>';
     
-    if (existingUser.rows.length > 0) {
-      userId = existingUser.rows[0].id;
-      // Verific dacă are deja subscription activ
-      const existingSub = await pool.query(
-        `SELECT id, status, is_trial FROM subscriptions 
-         WHERE user_id = $1 AND status IN ('active', 'grace_period') LIMIT 1`,
-        [userId]
-      );
-      if (existingSub.rows.length > 0) {
-        return res.status(409).json({ 
-          error: 'Acest user are deja un abonament activ',
-          existing_subscription_id: existingSub.rows[0].id,
-          is_trial: existingSub.rows[0].is_trial
-        });
+    const planText = r.plan || '—';
+    const planPill = r.plan ? `<span class="pill pill-blue">${planText}</span>` : '<span style="color:var(--muted)">—</span>';
+    
+    return `<tr>
+      <td style="font-size:12px">${r.email||'—'}</td>
+      <td>${planPill}</td>
+      <td style="font-family:var(--mono);text-align:center">${r.max_mt5_accounts||'—'}</td>
+      <td style="font-family:var(--mono);text-align:center;font-weight:700">${r.total_accounts}</td>
+      <td style="font-family:var(--mono);color:var(--accent);text-align:center">${r.active_accounts}</td>
+      <td style="font-family:var(--mono);color:${r.removed_accounts>0?'var(--warn)':'var(--muted)'};text-align:center">${r.removed_accounts}</td>
+      <td>${riskPill}</td>
+      <td>
+        <button class="action-btn" onclick="viewHistory(${r.user_id},'${(r.email||'').replace(/'/g,"\\'")}')">📋 Istoric</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function updateAbuseMetrics(){
+  const high = allAbuse.filter(r => r.risk_level === 'high').length;
+  const med = allAbuse.filter(r => r.risk_level === 'medium').length;
+  const low = allAbuse.filter(r => r.risk_level === 'low').length;
+  const totalRemoved = allAbuse.reduce((sum, r) => sum + parseInt(r.removed_accounts), 0);
+  
+  document.getElementById('abuseHigh').textContent = high;
+  document.getElementById('abuseMed').textContent = med;
+  document.getElementById('abuseLow').textContent = low;
+  document.getElementById('abuseRemoved').textContent = totalRemoved;
+}
+
+async function viewHistory(userId, email){
+  document.getElementById('historyTitle').textContent = '📋 Istoric conturi MT5';
+  document.getElementById('historySub').textContent = email;
+  document.getElementById('historyContent').innerHTML = 'Se încarcă...';
+  document.getElementById('historyModal').classList.add('open');
+  
+  try {
+    const r = await fetch(SERVER+'/admin/user-accounts/'+userId, { headers:{ 'x-admin-key': ADMIN_KEY } });
+    const data = await r.json();
+    if(!data.length){
+      document.getElementById('historyContent').innerHTML = '<div style="color:var(--muted)">Niciun cont MT5 înregistrat</div>';
+      return;
+    }
+    
+    let html = '<table style="margin-top:8px"><thead><tr><th>Cont MT5</th><th>Broker</th><th>Status</th><th>Adăugat</th><th>Șters</th></tr></thead><tbody>';
+    data.forEach(a => {
+      const statusPill = a.is_active 
+        ? '<span class="pill pill-green">Activ</span>'
+        : '<span class="pill pill-red">Șters</span>';
+      const addedDate = a.added_at ? new Date(a.added_at).toLocaleDateString('ro-RO') : '—';
+      const removedDate = a.removed_at ? new Date(a.removed_at).toLocaleDateString('ro-RO') : '—';
+      html += `<tr>
+        <td style="font-family:var(--mono)">${a.account_number}</td>
+        <td style="color:var(--muted);font-size:12px">${a.broker||'—'}</td>
+        <td>${statusPill}</td>
+        <td style="font-size:12px">${addedDate}</td>
+        <td style="font-size:12px;color:${a.removed_at?'var(--warn)':'var(--muted)'}">${removedDate}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    document.getElementById('historyContent').innerHTML = html;
+  } catch(e){
+    document.getElementById('historyContent').innerHTML = '<div style="color:var(--danger)">Eroare la încărcare</div>';
+  }
+}
+
+function closeHistoryModal(e){
+  if(e && e.target.id !== 'historyModal' && e.target.className !== 'modal-close') return;
+  document.getElementById('historyModal').classList.remove('open');
+}
+
+function renderClients(clients){
+  const tbody = document.getElementById('clientsTable');
+  if(!clients.length){ tbody.innerHTML='<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:24px">Niciun client găsit</td></tr>'; return; }
+  const PLAN_AMOUNTS = { 'basic': 25, 'pro': 45, 'full': 70, 'full_access': 70, 'monthly': 45 };
+  tbody.innerHTML = clients.map(c => {
+    const now = new Date();
+    const exp = new Date(c.expires_at);
+    const days = Math.ceil((exp-now)/86400000);
+    const statusPill = c.status==='active'
+      ? `<span class="pill pill-green">Activ</span>`
+      : c.status==='suspended'
+        ? `<span class="pill pill-amber">Suspendat</span>`
+        : `<span class="pill pill-red">Expirat</span>`;
+    const planPill = `<span class="pill pill-blue">${c.plan||'monthly'}</span>`;
+    const amount = PLAN_AMOUNTS[c.plan?.toLowerCase()] || 25;
+    const amountCell = `<span style="font-family:var(--mono);color:var(--accent);font-weight:700">€${amount}</span>`;
+    return `<tr>
+      <td style="font-family:var(--mono)">${c.account_id}</td>
+      <td style="font-size:12px;color:var(--muted)">${c.email||'—'}</td>
+      <td>${planPill}</td>
+      <td>${amountCell}</td>
+      <td>${statusPill}</td>
+      <td style="font-family:var(--mono);font-size:12px">${c.expires_at} ${c.status==='active'&&days>0?`<span style="color:var(--accent);font-size:10px">(${days}z)</span>`:''}</td>
+      <td style="font-size:12px;color:var(--muted)">${c.notes||'—'}</td>
+      <td>
+        ${c.status!=='active'?`<button class="action-btn" onclick="activateClient('${c.account_id}')">✅ Activ</button>`:''}
+        ${c.status==='active'?`<button class="action-btn" onclick="suspendClient('${c.account_id}')">⏸ Suspend</button>`:''}
+        <button class="action-btn danger" onclick="deleteClient('${c.account_id}')">🗑</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function filterClients(){
+  const q = document.getElementById('searchInput').value.toLowerCase();
+  const filtered = allClients.filter(c =>
+    (c.account_id||'').toLowerCase().includes(q) ||
+    (c.email||'').toLowerCase().includes(q) ||
+    (c.plan||'').toLowerCase().includes(q) ||
+    (c.status||'').toLowerCase().includes(q)
+  );
+  renderClients(filtered);
+}
+
+function updateMetrics(){
+  const active = allClients.filter(c=>c.status==='active').length;
+  const total = allClients.length;
+  const now = new Date();
+  const expiring = allClients.filter(c=>{
+    const days = Math.ceil((new Date(c.expires_at)-now)/86400000);
+    return c.status==='active' && days<=7 && days>0;
+  }).length;
+  // Calcul revenue corect pe baza planului fiecărui client
+  const PLAN_PRICES = { 'basic': 25, 'pro': 45, 'full': 70, 'full_access': 70, 'monthly': 45 };
+  const revenue = allClients
+    .filter(c => c.status === 'active')
+    .reduce((sum, c) => sum + (PLAN_PRICES[c.plan?.toLowerCase()] || 25), 0);
+  document.getElementById('mActive').textContent = active;
+  document.getElementById('mActiveSub').textContent = `din ${total} total`;
+  document.getElementById('mRevenue').textContent = `€${revenue}`;
+  document.getElementById('mExpiring').textContent = expiring;
+  document.getElementById('mExpiringSub').textContent = expiring>0 ? 'necesită atenție' : 'totul ok';
+  document.getElementById('mTotal').textContent = total;
+  document.getElementById('mTotalSub').textContent = `${total-active} inactive`;
+}
+
+function updateRenewals(){
+  const now = new Date();
+  const expiring = allClients.filter(c=>{
+    const days = Math.ceil((new Date(c.expires_at)-now)/86400000);
+    return c.status==='active' && days<=7 && days>0;
+  }).sort((a,b)=>new Date(a.expires_at)-new Date(b.expires_at));
+
+  const box = document.getElementById('renewalList');
+  if(!expiring.length){ box.innerHTML='<div style="font-size:13px;color:var(--accent)">✅ Nicio reînnoire urgentă</div>'; return; }
+  box.innerHTML = expiring.map(c=>{
+    const days = Math.ceil((new Date(c.expires_at)-now)/86400000);
+    return `<div class="renewal-item">
+      <div><div class="renewal-name">${c.account_id}</div><div class="renewal-plan">${c.email||'—'} · ${c.plan||'monthly'}</div></div>
+      <div style="text-align:right"><div class="renewal-date">${c.expires_at}</div><div style="font-size:11px;color:${days<=3?'var(--danger)':'var(--warn)'};">${days} zile</div></div>
+    </div>`;
+  }).join('');
+}
+
+async function addLicense(){
+  const account = document.getElementById('addAccount').value.trim();
+  const email   = document.getElementById('addEmail').value.trim();
+  const months  = document.getElementById('addMonths').value;
+  const plan    = document.getElementById('addPlan').value;
+  const notes   = document.getElementById('addNotes').value.trim();
+  const ok  = document.getElementById('addOk');
+  const err = document.getElementById('addErr');
+  ok.style.display='none'; err.style.display='none';
+  if(!account){ err.textContent='Contul MT5 e obligatoriu!'; err.style.display='block'; return; }
+  try {
+    const r = await fetch(SERVER+'/admin/license', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-admin-key':ADMIN_KEY},
+      body: JSON.stringify({ account_id:account, email, months:parseInt(months), plan, notes })
+    });
+    const data = await r.json();
+    if(data.success){
+      ok.textContent = `✅ Licență adăugată! Expiră: ${data.expires_at}`;
+      ok.style.display='block';
+      document.getElementById('addAccount').value='';
+      document.getElementById('addEmail').value='';
+      document.getElementById('addNotes').value='';
+      loadClients();
+    } else {
+      err.textContent = 'Eroare: '+JSON.stringify(data); err.style.display='block';
+    }
+  } catch(e){ err.textContent='Eroare conexiune!'; err.style.display='block'; }
+}
+
+async function generatePayLink(){
+  const account = document.getElementById('addAccount').value.trim();
+  const email   = document.getElementById('addEmail').value.trim();
+  const months  = document.getElementById('addMonths').value;
+  const err = document.getElementById('addErr');
+  err.style.display='none';
+  if(!account){ err.textContent='Contul MT5 e obligatoriu!'; err.style.display='block'; return; }
+  try {
+    const r = await fetch(SERVER+'/admin/payment-link', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-admin-key':ADMIN_KEY},
+      body: JSON.stringify({ account_id:account, email, months:parseInt(months) })
+    });
+    const data = await r.json();
+    if(data.url){
+      document.getElementById('payLinkBox').innerHTML = `<a href="${data.url}" target="_blank" style="color:var(--accent)">${data.url}</a>`;
+    }
+  } catch(e){ err.textContent='Eroare conexiune!'; err.style.display='block'; }
+}
+
+async function suspendClient(id){
+  if(!confirm('Suspendezi contul '+id+'?')) return;
+  await fetch(SERVER+'/admin/license/'+id+'/suspend', { method:'PATCH', headers:{'x-admin-key':ADMIN_KEY} });
+  loadClients();
+}
+
+async function activateClient(id){
+  await fetch(SERVER+'/admin/license/'+id+'/activate', { method:'PATCH', headers:{'x-admin-key':ADMIN_KEY} });
+  loadClients();
+}
+
+async function deleteClient(id){
+  if(!confirm('Ștergi definitiv contul '+id+'? Nu se poate recupera!')) return;
+  await fetch(SERVER+'/admin/license/'+id, { method:'DELETE', headers:{'x-admin-key':ADMIN_KEY} });
+  loadClients();
+}
+
+async function addDiscordRole(){
+  const email = document.getElementById('discordEmail').value.trim();
+  const plan  = document.getElementById('discordPlan').value;
+  const ok  = document.getElementById('discordOk');
+  const err = document.getElementById('discordErr');
+  ok.style.display='none'; err.style.display='none';
+  if(!email){ err.textContent='Introdu emailul!'; err.style.display='block'; return; }
+  try {
+    const r = await fetch(SERVER+'/discord/add-role', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-admin-key':ADMIN_KEY},
+      body: JSON.stringify({ email, plan })
+    });
+    const data = await r.json();
+    if(data.success){ ok.textContent='✅ Rol adăugat pe Discord!'; ok.style.display='block'; }
+    else { err.textContent='Utilizatorul nu a fost găsit pe Discord!'; err.style.display='block'; }
+  } catch(e){ err.textContent='Eroare conexiune!'; err.style.display='block'; }
+}
+
+async function removeDiscordRole(){
+  const email = document.getElementById('discordEmail').value.trim();
+  const ok  = document.getElementById('discordOk');
+  const err = document.getElementById('discordErr');
+  ok.style.display='none'; err.style.display='none';
+  if(!email){ err.textContent='Introdu emailul!'; err.style.display='block'; return; }
+  try {
+    const r = await fetch(SERVER+'/discord/remove-role', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','x-admin-key':ADMIN_KEY},
+      body: JSON.stringify({ email })
+    });
+    const data = await r.json();
+    if(data.success){ ok.textContent='✅ Rol șters de pe Discord!'; ok.style.display='block'; }
+    else { err.textContent='Utilizatorul nu a fost găsit pe Discord!'; err.style.display='block'; }
+  } catch(e){ err.textContent='Eroare conexiune!'; err.style.display='block'; }
+}
+
+function exportCSV(){
+  const headers = ['Cont MT5','Email','Plan','Status','Expiră','Note'];
+  const rows = allClients.map(c=>[c.account_id,c.email||'',c.plan||'',c.status,c.expires_at,c.notes||'']);
+  const csv = [headers,...rows].map(r=>r.join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'ea-clients-'+new Date().toISOString().split('T')[0]+'.csv';
+  a.click();
+}
+
+function generateAdminPDF() {
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('ro-RO');
+  const active = allClients.filter(c=>c.status==='active').length;
+  const PLAN_PRICES_PDF = { 'basic': 25, 'pro': 45, 'full': 70, 'full_access': 70, 'monthly': 45 };
+  const revenue = allClients
+    .filter(c => c.status === 'active')
+    .reduce((sum, c) => sum + (PLAN_PRICES_PDF[c.plan?.toLowerCase()] || 25), 0);
+
+  const rows = allClients.map(c => {
+    const exp = new Date(c.expires_at);
+    const days = Math.ceil((exp - now) / 86400000);
+    const statusText = c.status === 'active' ? 'Activ' : c.status === 'suspended' ? 'Suspendat' : 'Expirat';
+    const amount = PLAN_PRICES_PDF[c.plan?.toLowerCase()] || 25;
+    return `<tr>
+      <td>${c.account_id}</td>
+      <td>${c.email || '—'}</td>
+      <td>${c.plan || 'monthly'}</td>
+      <td style="font-weight:700;color:#00a86b">€${amount}</td>
+      <td style="color:${c.status==='active'?'#00a86b':'#cc0000'}">${statusText}</td>
+      <td>${c.expires_at}</td>
+      <td>${c.status==='active'&&days>0?days+' zile':'—'}</td>
+      <td>${c.notes || '—'}</td>
+    </tr>`;
+  }).join('');
+
+  const win = window.open('', '_blank');
+  win.document.write(`<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Raport Clienti EA Strategies — ${dateStr}</title>
+<style>
+  body{font-family:Arial,sans-serif;padding:30px;color:#1a1a1a;}
+  .no-print{position:fixed;bottom:28px;right:28px;display:flex;gap:10px;z-index:999;}
+  .btn-print{padding:13px 28px;background:#00e5a0;color:#000;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;box-shadow:0 4px 16px rgba(0,229,160,.35);font-family:Arial,sans-serif;}
+  .btn-print:hover{background:#00c98a;}
+  .btn-close{padding:13px 18px;background:#f0f0f0;color:#333;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;font-family:Arial,sans-serif;}
+  .btn-close:hover{background:#e0e0e0;}
+  .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:30px;border-bottom:3px solid #00e5a0;padding-bottom:16px;}
+  .company{font-size:20px;font-weight:800;}
+  .company-sub{font-size:11px;color:#666;margin-top:3px;}
+  .report-title{font-size:22px;font-weight:700;text-align:right;}
+  .report-date{font-size:11px;color:#666;text-align:right;}
+  .metrics{display:flex;gap:20px;margin-bottom:24px;}
+  .metric{flex:1;background:#f5f5f5;border-radius:8px;padding:14px;text-align:center;}
+  .metric-val{font-size:24px;font-weight:700;color:#0a0c0f;}
+  .metric-lbl{font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-top:4px;}
+  table{width:100%;border-collapse:collapse;font-size:12px;}
+  th{background:#0a0c0f;color:#fff;padding:10px 12px;text-align:left;font-size:11px;text-transform:uppercase;}
+  td{padding:10px 12px;border-bottom:1px solid #eee;}
+  tr:hover td{background:#fafafa;}
+  .footer{text-align:center;margin-top:30px;font-size:10px;color:#999;border-top:1px solid #eee;padding-top:14px;}
+  @media print{
+    .no-print{display:none!important;}
+    body{padding:15px;}
+  }
+</style>
+</head>
+<body>
+
+<div class="no-print">
+  <button class="btn-print" onclick="window.print()">🖨 Imprimă / Salvează PDF</button>
+  <button class="btn-close" onclick="window.close()">✕ Închide</button>
+</div>
+
+<div class="header">
+  <div>
+    <div class="company">EA Strategies</div>
+    <div class="company-sub">Raport intern — Confidential</div>
+    <div class="company-sub">ea-license-server-lrsl.onrender.com</div>
+  </div>
+  <div>
+    <div class="report-title">RAPORT CLIENTI</div>
+    <div class="report-date">Generat: ${dateStr}</div>
+  </div>
+</div>
+
+<div class="metrics">
+  <div class="metric"><div class="metric-val">${allClients.length}</div><div class="metric-lbl">Total licente</div></div>
+  <div class="metric"><div class="metric-val">${active}</div><div class="metric-lbl">Clienti activi</div></div>
+  <div class="metric"><div class="metric-val">€${revenue}</div><div class="metric-lbl">Revenue lunar est.</div></div>
+  <div class="metric"><div class="metric-val">${allClients.length - active}</div><div class="metric-lbl">Inactive</div></div>
+</div>
+
+<table>
+  <thead>
+    <tr><th>Cont MT5</th><th>Email</th><th>Plan</th><th>Sumă</th><th>Status</th><th>Expira</th><th>Zile ramase</th><th>Note</th></tr>
+  </thead>
+  <tbody>${rows}</tbody>
+</table>
+
+<div class="footer">
+  <p>EA Strategies — Document generat automat pe ${dateStr} | Confidential — doar pentru uz intern</p>
+</div>
+
+</body>
+</html>`);
+  win.document.close();
+}
+
+function showErr(id, msg){
+  const el = document.getElementById(id);
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+// ─── 🆕 ACTIVITATE LIVE — Monitor dashboard ──────────────────────────
+async function loadActivityMonitor(){
+  try {
+    document.getElementById('activityLastUpdate').textContent = 'Se încarcă...';
+    const r = await fetch(SERVER+'/admin/activity-monitor', { headers:{ 'x-admin-key': ADMIN_KEY } });
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const data = await r.json();
+    renderActivitySummary(data.summary, data.financial);
+    renderActivityNotifs(data);
+    renderActivityClients(data.clients);
+    renderActivityTopEas(data.top_eas);
+    renderActivityWeekly(data.weekly_activity);
+    renderActivityMt5(data.mt5_accounts);
+    renderActivityRecentCheckins(data.recent_checkins);
+    renderPlanDistribution(data.financial);
+    const updTime = new Date(data.generated_at).toLocaleTimeString('ro-RO');
+    document.getElementById('activityLastUpdate').textContent = `Actualizat la ${updTime} • ${data.recent_checkins.length} check-ins recente`;
+  } catch(e){
+    console.error('Activity monitor error:', e);
+    document.getElementById('activityLastUpdate').textContent = '❌ Eroare la încărcare: '+e.message;
+  }
+}
+
+function renderActivitySummary(summary, financial){
+  document.getElementById('actActive').textContent = summary.active_now || 0;
+  document.getElementById('actInactive').textContent = summary.inactive_24_48h || 0;
+  document.getElementById('actErrors').textContent = summary.errors_today || 0;
+  document.getElementById('actTotal').textContent = financial.total_active || 0;
+}
+
+function renderPlanDistribution(financial){
+  const total = parseInt(financial.total_active) || 0;
+  const basic = parseInt(financial.basic_count) || 0;
+  const pro = parseInt(financial.pro_count) || 0;
+  const full = parseInt(financial.full_count) || 0;
+  const box = document.getElementById('planDistribution');
+  
+  if(total === 0){
+    box.innerHTML = '<div style="font-size:13px;color:var(--muted);text-align:center;padding:12px">Niciun client activ</div>';
+    return;
+  }
+  
+  const makeBar = (name, count, color, price) => {
+    const pct = total > 0 ? Math.round((count/total)*100) : 0;
+    const revenue = count * price;
+    return `<div class="ea-bar-row">
+      <div class="ea-bar-header">
+        <span class="ea-bar-name">${name} <span style="color:var(--muted);font-weight:400">(€${price}/lună)</span></span>
+        <span class="ea-bar-count">${count} client${count!==1?'i':''} (${pct}%) • €${revenue}</span>
+      </div>
+      <div class="ea-bar-track"><div class="ea-bar-fill" style="width:${pct}%;background:${color}"></div></div>
+    </div>`;
+  };
+  
+  box.innerHTML = makeBar('Basic', basic, '#B5D4F4', 25) +
+                  makeBar('Pro', pro, 'var(--accent2)', 45) +
+                  makeBar('Full Access', full, 'var(--accent)', 70);
+}
+
+function renderActivityNotifs(data){
+  const notifs = [];
+  
+  // Clienți inactivi 24-48h
+  if(data.summary.inactive_24_48h > 0){
+    notifs.push({
+      type: 'warning',
+      emoji: '⚠️',
+      title: `${data.summary.inactive_24_48h} client${data.summary.inactive_24_48h>1?'i':''} ${data.summary.inactive_24_48h>1?'au':'nu'} mai făcut check-in de 24h`,
+      sub: 'Vezi lista clienților de mai jos și contactează-i dacă e nevoie'
+    });
+  }
+  
+  // Erori în ultimele 24h
+  if(data.summary.errors_today > 0){
+    notifs.push({
+      type: 'warning',
+      emoji: '🚨',
+      title: `${data.summary.errors_today} erori în ultimele 24h`,
+      sub: 'Vezi tabelul "Ultimele check-in-uri" pentru detalii'
+    });
+  }
+  
+  // Subscriptions expiring soon
+  const expSoon = parseInt(data.financial.expiring_soon) || 0;
+  if(expSoon > 0){
+    notifs.push({
+      type: 'warning',
+      emoji: '⏳',
+      title: `${expSoon} abonament${expSoon>1?'e':''} expiră în următoarele 7 zile`,
+      sub: 'Verifică în tab-ul Overview pentru detalii reînnoiri'
+    });
+  }
+  
+  // Security OK
+  const totalCheckins = data.recent_checkins.length;
+  if(totalCheckins > 0 && data.summary.errors_today === 0){
+    notifs.push({
+      type: 'success',
+      emoji: '✅',
+      title: 'Sistem securitate OK',
+      sub: `${totalCheckins} check-in-uri recente, toate HMAC valide`
+    });
+  }
+  
+  // Dacă nu există notificări speciale
+  if(notifs.length === 0){
+    notifs.push({
+      type: 'success',
+      emoji: '✅',
+      title: 'Totul funcționează normal',
+      sub: 'Niciun client cu probleme, niciun avertisment activ'
+    });
+  }
+  
+  document.getElementById('notifList').innerHTML = notifs.map(n => 
+    `<div class="notif-item ${n.type}">
+      <div class="notif-emoji">${n.emoji}</div>
+      <div class="notif-content">
+        <div class="notif-title">${n.title}</div>
+        <div class="notif-sub">${n.sub}</div>
+      </div>
+    </div>`
+  ).join('');
+}
+
+function renderActivityClients(clients){
+  const box = document.getElementById('clientsActivityList');
+  
+  if(!clients || !clients.length){
+    box.innerHTML = '<div style="font-size:13px;color:var(--muted);text-align:center;padding:12px">Niciun client cu abonament activ</div>';
+    return;
+  }
+  
+  const now = new Date();
+  box.innerHTML = clients.map(c => {
+    const initials = (c.email||'??').substring(0,2).toUpperCase();
+    const lastCheckin = c.last_checkin ? new Date(c.last_checkin) : null;
+    
+    let statusPill, statusText, lastText;
+    if(lastCheckin){
+      const hoursAgo = (now - lastCheckin) / (1000*60*60);
+      if(hoursAgo < 2){
+        statusPill = 'pill-green';
+        statusText = '🟢 Activ';
+        lastText = `Activ acum ${Math.round(hoursAgo*60)} min`;
+      } else if(hoursAgo < 24){
+        statusPill = 'pill-green';
+        statusText = '🟢 Activ';
+        lastText = `Acum ${Math.round(hoursAgo)}h`;
+      } else if(hoursAgo < 120){
+        statusPill = 'pill-amber';
+        statusText = '🟡 Inactiv';
+        lastText = `Acum ${Math.round(hoursAgo/24)} zile`;
+      } else {
+        statusPill = 'pill-red';
+        statusText = '🔴 Dispărut';
+        lastText = `Acum ${Math.round(hoursAgo/24)} zile`;
       }
     } else {
-      // Creez user nou (fără stripe_customer_id — trial e gratis)
-      const newUser = await pool.query(
-        'INSERT INTO users (email) VALUES ($1) RETURNING id',
-        [email.trim()]
-      );
-      userId = newUser.rows[0].id;
+      statusPill = 'pill-amber';
+      statusText = '⏳ Niciun check-in';
+      lastText = 'N-a rulat încă EA-uri';
     }
+    
+    return `<div class="client-row">
+      <div class="client-avatar">${initials}</div>
+      <div class="client-info">
+        <div class="client-name">${c.email||'(fără email)'}</div>
+        <div class="client-meta">${(c.plan||'?').toUpperCase()} • ${c.active_eas_count||0} EA-uri • ${c.active_accounts_count||0} conturi MT5 • ${lastText}</div>
+      </div>
+      <span class="pill ${statusPill}">${statusText}</span>
+    </div>`;
+  }).join('');
+}
 
-    // 2. Calculez expirare trial
-    const trialEnd = new Date();
-    trialEnd.setDate(trialEnd.getDate() + daysInt);
+function renderActivityTopEas(topEas){
+  const box = document.getElementById('topEasList');
+  if(!topEas || !topEas.length){
+    box.innerHTML = '<div style="font-size:13px;color:var(--muted);text-align:center;padding:12px">Niciun check-in în ultimele 7 zile</div>';
+    return;
+  }
+  
+  const maxCount = Math.max(...topEas.map(e => parseInt(e.checkins_count)));
+  box.innerHTML = topEas.map(ea => {
+    const count = parseInt(ea.checkins_count);
+    const pct = maxCount > 0 ? (count/maxCount)*100 : 0;
+    return `<div class="ea-bar-row">
+      <div class="ea-bar-header">
+        <span class="ea-bar-name">${ea.ea_name}</span>
+        <span class="ea-bar-count">${count} check-ins</span>
+      </div>
+      <div class="ea-bar-track"><div class="ea-bar-fill" style="width:${pct}%"></div></div>
+    </div>`;
+  }).join('');
+}
 
-    // 3. Determin max_mt5_accounts pe baza planului
-    const maxAccountsByPlan = { basic: 1, pro: 2, full_access: 3 };
-    const maxAccounts = maxAccountsByPlan[plan];
-
-    // 4. Creez subscription cu is_trial=true
-    const subResult = await pool.query(
-      `INSERT INTO subscriptions 
-       (user_id, plan, max_mt5_accounts, status, current_period_end, 
-        is_trial, trial_source, trial_notes) 
-       VALUES ($1, $2, $3, 'active', $4, true, $5, $6) RETURNING id`,
-      [userId, plan, maxAccounts, trialEnd.toISOString(), trial_source, trial_notes || null]
-    );
-    const subId = subResult.rows[0].id;
-
-    // 5. Adaug cont MT5 (dacă e furnizat)
-    if (mt5_account) {
-      await pool.query(
-        `INSERT INTO mt5_accounts (user_id, subscription_id, account_number, is_active, added_at)
-         VALUES ($1, $2, $3, true, NOW())
-         ON CONFLICT DO NOTHING`,
-        [userId, subId, String(mt5_account)]
-      );
-    }
-
-    // 6. Creez ea_licenses
-    const EA_MAP = {
-      'ZigZag Fibo EA': 'Fibo_Final_V3.ex5',
-      'Killer Indices EA': 'Killer_Indices_RobertAbo_V3.ex5',
-      'Meneger Stock EA': 'Meneger_Stock_MarketsABO_V3.ex5',
-      'Range Breakout EA': 'Range_Breakout_Abo_V3.ex5',
-      'Robert Long EA': 'Robert_Long_Indices_ABO_V3.ex5',
-      'Simple BuyDay EA': 'Simple__BuyDay_EAABO_V3.ex5'
-    };
-    const ALL_EAS = Object.keys(EA_MAP);
-
-    let eaList = [];
-    if (plan === 'full_access') {
-      // Full = toate 6 automat
-      eaList = ALL_EAS;
-    } else if (Array.isArray(ea_names) && ea_names.length > 0) {
-      // EA-uri alese explicit
-      eaList = ea_names.filter(n => ALL_EAS.includes(n));
-      const maxEAs = plan === 'pro' ? 3 : 1;
-      eaList = eaList.slice(0, maxEAs);
-    }
-
-    for (const eaName of eaList) {
-      await pool.query(
-        `INSERT INTO ea_licenses 
-         (user_id, subscription_id, ea_name, file_name, status, activated_at, expires_at)
-         VALUES ($1, $2, $3, $4, 'active', NOW(), $5)`,
-        [userId, subId, eaName, EA_MAP[eaName], trialEnd.toISOString()]
-      );
-    }
-
-    // 7. Telegram
-    const sourceLabels = {
-      friend: 'Prieten', influencer: 'Influencer', tester: 'Tester',
-      demo: 'Demo', other: 'Altul'
-    };
-    await sendTelegram(
-      `🎁 <b>TRIAL GRATUIT CREAT</b>\n` +
-      `📧 ${email}\n` +
-      `📦 Plan: ${plan.toUpperCase()}\n` +
-      `⏱️ Durată: ${daysInt} zile\n` +
-      `📅 Expiră: ${trialEnd.toISOString().split('T')[0]}\n` +
-      `🏷️ Sursă: ${sourceLabels[trial_source]}\n` +
-      `🤖 EA-uri: ${eaList.length > 0 ? eaList.join(', ') : 'niciuna'}` +
-      (mt5_account ? `\n💼 Cont MT5: #${mt5_account}` : '') +
-      (trial_notes ? `\n📝 Note: ${trial_notes}` : '')
-    );
-
-    res.json({
-      success: true,
-      user_id: userId,
-      subscription_id: subId,
-      email: email.trim(),
-      plan: plan,
-      trial_end: trialEnd.toISOString(),
-      days: daysInt,
-      eas_assigned: eaList,
-      mt5_account: mt5_account || null
+function renderActivityWeekly(weekly){
+  const box = document.getElementById('weeklyChart');
+  
+  // Generez ultimele 7 zile (chiar dacă nu au date)
+  const days = [];
+  const today = new Date();
+  for(let i=6; i>=0; i--){
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const dayName = ['Du','Lu','Ma','Mi','Jo','Vi','Sâ'][d.getDay()];
+    const dateStr = d.toISOString().split('T')[0];
+    const found = weekly && weekly.find(w => {
+      const wDate = new Date(w.day).toISOString().split('T')[0];
+      return wDate === dateStr;
     });
-  } catch (e) {
-    console.error('Create trial error:', e.message);
-    res.status(500).json({ error: e.message });
+    days.push({ label: dayName, count: found ? parseInt(found.checkins) : 0 });
   }
-});
-
-// GET /admin/trial-list
-// Returnează lista trial-urilor (active + expirate, cu filtru ?status=active)
-app.get('/admin/trial-list', adminAuth, async (req, res) => {
-  try {
-    const { status } = req.query;
-    let whereClause = 's.is_trial = true';
-    const params = [];
-    if (status === 'active') {
-      whereClause += " AND s.status = 'active' AND s.current_period_end > NOW()";
-    } else if (status === 'expired') {
-      whereClause += " AND (s.status = 'expired' OR s.current_period_end < NOW())";
-    }
-    const r = await pool.query(`
-      SELECT 
-        s.id AS subscription_id,
-        s.user_id,
-        s.plan,
-        s.status,
-        s.current_period_end,
-        s.trial_source,
-        s.trial_notes,
-        s.created_at,
-        u.email,
-        u.discord_username,
-        EXTRACT(DAY FROM (s.current_period_end - NOW())) AS days_left,
-        (SELECT COUNT(*) FROM ea_licenses WHERE user_id = s.user_id AND status = 'active') AS active_eas,
-        (SELECT COUNT(*) FROM mt5_accounts WHERE user_id = s.user_id AND is_active = true) AS active_accounts
-      FROM subscriptions s
-      JOIN users u ON u.id = s.user_id
-      WHERE ${whereClause}
-      ORDER BY s.current_period_end DESC
-    `, params);
-    res.json(r.rows);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// DELETE /admin/trial/:id
-// Anulează un trial înainte de expirare (manual)
-app.delete('/admin/trial/:id', adminAuth, async (req, res) => {
-  try {
-    const subId = req.params.id;
-    
-    // Verific că e trial
-    const check = await pool.query(
-      `SELECT s.user_id, s.is_trial, u.email 
-       FROM subscriptions s JOIN users u ON u.id = s.user_id 
-       WHERE s.id = $1 LIMIT 1`,
-      [subId]
-    );
-    if (check.rows.length === 0) return res.status(404).json({ error: 'Subscription not found' });
-    if (!check.rows[0].is_trial) return res.status(400).json({ error: 'Acest abonament nu e trial' });
-    
-    const { user_id, email } = check.rows[0];
-
-    // Marchez ca expired (păstrez înregistrarea pentru istoric)
-    await pool.query("UPDATE subscriptions SET status='expired', current_period_end=NOW() WHERE id=$1", [subId]);
-    await pool.query("UPDATE ea_licenses SET status='expired' WHERE user_id=$1", [user_id]);
-
-    // Scot rol Discord
-    if (email) await removeDiscordRole(email, false, 'Trial anulat manual');
-
-    await sendTelegram(`🚫 <b>Trial anulat manual</b>\n📧 ${email}\n⏰ Acces blocat imediat`);
-    
-    res.json({ success: true, subscription_id: subId, user_id, email });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-app.get('/admin/logs', adminAuth, async (req, res) => {
-  const { account } = req.query;
-  let result;
-  if (account) {
-    result = await pool.query('SELECT * FROM access_log WHERE account_id=$1 ORDER BY checked_at DESC LIMIT 100', [account]);
-  } else {
-    result = await pool.query('SELECT * FROM access_log ORDER BY checked_at DESC LIMIT 200');
-  }
-  res.json(result.rows);
-});
-
-async function logAccess(account, ip, result) {
-  try {
-    await pool.query('INSERT INTO access_log (account_id, ip, result) VALUES ($1,$2,$3)', [account, ip, result]);
-  } catch (_) {}
+  
+  const maxCount = Math.max(...days.map(d => d.count), 1);
+  const total = days.reduce((sum, d) => sum + d.count, 0);
+  
+  box.innerHTML = `
+    <div class="activity-bars">
+      ${days.map(d => {
+        const height = (d.count/maxCount)*100;
+        return `<div class="day-bar-wrap">
+          <div class="day-bar ${d.count===0?'empty':''}" style="height:${d.count===0?2:height}%" title="${d.count} check-ins"></div>
+          <div class="day-bar-lbl">${d.label}</div>
+        </div>`;
+      }).join('')}
+    </div>
+    <div style="font-size:11px;color:var(--muted);text-align:center;margin-top:8px">Total: ${total} check-ins (7 zile)</div>
+  `;
 }
 
-// 🆕 SESIUNEA 4: Logging extins în access_log_v2 cu detalii HMAC + user_id
-async function logAccessV2(userId, account, eaName, ip, result, hmacValid, timestampValid) {
-  try {
-    await pool.query(
-      'INSERT INTO access_log_v2 (user_id, account_number, ea_name, ip, result, hmac_valid, timestamp_valid) VALUES ($1,$2,$3,$4,$5,$6,$7)',
-      [userId, account, eaName, ip, result, hmacValid, timestampValid]
-    );
-  } catch (_) {}
+function renderActivityMt5(accounts){
+  const tbody = document.getElementById('mt5AccountsTable');
+  if(!accounts || !accounts.length){
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:24px">Niciun cont MT5 activ</td></tr>';
+    return;
+  }
+  
+  tbody.innerHTML = accounts.map(a => {
+    const date = a.added_at ? new Date(a.added_at).toLocaleDateString('ro-RO') : '—';
+    return `<tr>
+      <td style="font-size:12px;color:var(--muted)">${a.email||'—'}</td>
+      <td style="font-family:var(--mono)">${a.account_number}</td>
+      <td>${a.broker || '<span style="color:var(--muted)">—</span>'}</td>
+      <td><span class="pill pill-blue">${(a.plan||'?').toUpperCase()}</span></td>
+      <td style="font-size:12px;color:var(--muted)">${date}</td>
+    </tr>`;
+  }).join('');
 }
 
-// ─── Start ────────────────────────────────────────────────────────────────────
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`✅ License server running on port ${PORT}`);
-  sendTelegram('🚀 <b>EA Manager Server pornit!</b>');
-});
+function renderActivityRecentCheckins(checkins){
+  const tbody = document.getElementById('recentCheckinsTable');
+  if(!checkins || !checkins.length){
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:24px">Niciun check-in recent</td></tr>';
+    return;
+  }
+  
+  const now = new Date();
+  tbody.innerHTML = checkins.map(c => {
+    const checkinTime = new Date(c.checked_at);
+    const diffMin = Math.round((now - checkinTime) / 60000);
+    let timeAgo;
+    if(diffMin < 60) timeAgo = `acum ${diffMin} min`;
+    else if(diffMin < 1440) timeAgo = `acum ${Math.round(diffMin/60)}h`;
+    else timeAgo = `acum ${Math.round(diffMin/1440)} zile`;
+    
+    return `<tr>
+      <td style="font-size:12px;color:var(--muted)">${c.email||'—'}</td>
+      <td>${c.ea_name||'—'}</td>
+      <td style="font-family:var(--mono);font-size:12px">${c.account_number||'—'}</td>
+      <td><span class="pill pill-green">✓ Valid</span></td>
+      <td style="font-size:12px;color:var(--muted)">${timeAgo}</td>
+    </tr>`;
+  }).join('');
+}
+
+// Check session
+const saved = sessionStorage.getItem('ea_admin_key');
+if(saved){ ADMIN_KEY=saved; showDashboard(); }
+</script>
+</body>
+</html>
