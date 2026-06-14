@@ -2370,12 +2370,37 @@ app.post('/admin/extend-subscription', adminAuth, async (req, res) => {
     );
 
     // 5. Update și tabela veche licenses (backwards compat)
-    if (sub.email) {
-      const legacyDate = newPeriodEnd.toISOString().split('T')[0];
-      await pool.query(
-        `UPDATE licenses SET expires_at = $1, status = 'active' WHERE email = $2`,
-        [legacyDate, sub.email]
+    // 🆕 FIX: Folosesc account_id (cont MT5) în loc de email
+    // Deoarece la "Claim Subscription" emailul se schimbă în users dar NU și în licenses
+    // Caut prin mt5_accounts → account_number, care e identificator stabil
+    try {
+      const mt5Query = await pool.query(
+        `SELECT account_number FROM mt5_accounts 
+         WHERE user_id = $1 AND is_active = true 
+         ORDER BY added_at ASC`,
+        [user_id]
       );
+      const legacyDate = newPeriodEnd.toISOString().split('T')[0];
+      
+      if (mt5Query.rows.length > 0) {
+        // Update prin account_id pentru toate conturile MT5 ale userului
+        for (const acc of mt5Query.rows) {
+          await pool.query(
+            `UPDATE licenses SET expires_at = $1, status = 'active' WHERE account_id = $2`,
+            [legacyDate, acc.account_number]
+          );
+        }
+        console.log(`✅ Tabela licenses actualizată pentru ${mt5Query.rows.length} cont(uri) MT5`);
+      } else if (sub.email) {
+        // Fallback: dacă nu există conturi MT5, încerc prin email (cazul rar)
+        await pool.query(
+          `UPDATE licenses SET expires_at = $1, status = 'active' WHERE email = $2`,
+          [legacyDate, sub.email]
+        );
+      }
+    } catch (e) {
+      console.error('Eroare update licenses (legacy):', e.message);
+      // Nu blocăm — sistemul nou e sursa de adevăr
     }
 
     // 6. Loghez în manual_extensions
