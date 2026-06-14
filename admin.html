@@ -196,6 +196,7 @@ tr:hover td{background:rgba(255,255,255,.02);}
       <button class="tab" onclick="showTab('add',this)">➕ Adaugă licență</button>
       <button class="tab" onclick="showTab('discord',this)">💬 Discord</button>
       <button class="tab" onclick="showTab('activity',this)">📡 Activitate Live</button>
+      <button class="tab" onclick="showTab('trials',this)">🎁 Trial-uri</button>
     </div>
 
     <!-- OVERVIEW TAB -->
@@ -473,6 +474,88 @@ tr:hover td{background:rgba(255,255,255,.02);}
       </div>
     </div>
 
+    <!-- 🆕 TRIALS TAB -->
+    <div id="tab-trials" style="display:none">
+      <div class="activity-header">
+        <div class="activity-title-block">
+          <h2>🎁 Trial-uri gratuite</h2>
+          <p id="trialsLastUpdate">Pentru prieteni, testeri, influenceri și demo-uri</p>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn-secondary" onclick="loadTrials()" style="padding:8px 16px;font-size:12px">↻ Actualizează</button>
+          <button class="btn-primary" onclick="openTrialModal()" style="padding:8px 16px;font-size:12px">➕ Adaugă trial nou</button>
+        </div>
+      </div>
+
+      <!-- Sumar trial-uri -->
+      <div class="metrics-grid">
+        <div class="live-metric">
+          <div class="live-metric-lbl">🟢 Trial-uri active</div>
+          <div class="live-metric-val" id="trialActive">—</div>
+          <div class="live-metric-sub">în desfășurare</div>
+        </div>
+        <div class="live-metric amber">
+          <div class="live-metric-lbl">⏳ Expiră în 7 zile</div>
+          <div class="live-metric-val" id="trialExpiring">—</div>
+          <div class="live-metric-sub">necesită atenție</div>
+        </div>
+        <div class="live-metric red">
+          <div class="live-metric-lbl">❌ Expirate</div>
+          <div class="live-metric-val" id="trialExpired">—</div>
+          <div class="live-metric-sub">total în istoric</div>
+        </div>
+        <div class="live-metric blue">
+          <div class="live-metric-lbl">📊 Total trial-uri</div>
+          <div class="live-metric-val" id="trialTotal">—</div>
+          <div class="live-metric-sub">acordate vreodată</div>
+        </div>
+      </div>
+
+      <!-- Tabel trial-uri active -->
+      <div class="section-label">🟢 Trial-uri active</div>
+      <div class="table-card">
+        <div style="overflow-x:auto">
+          <table>
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Plan</th>
+                <th>Sursă</th>
+                <th>Expiră</th>
+                <th>Zile rămase</th>
+                <th>EA-uri</th>
+                <th>Acțiuni</th>
+              </tr>
+            </thead>
+            <tbody id="trialsActiveTable">
+              <tr><td colspan="7" style="text-align:center;color:var(--muted);padding:24px">Se încarcă...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Tabel trial-uri expirate (istoric) -->
+      <div class="section-label">📚 Istoric trial-uri (expirate)</div>
+      <div class="table-card">
+        <div style="overflow-x:auto">
+          <table>
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Plan</th>
+                <th>Sursă</th>
+                <th>Expirat la</th>
+                <th>Note</th>
+              </tr>
+            </thead>
+            <tbody id="trialsExpiredTable">
+              <tr><td colspan="5" style="text-align:center;color:var(--muted);padding:24px">Se încarcă...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -483,6 +566,141 @@ tr:hover td{background:rgba(255,255,255,.02);}
     <div class="modal-title" id="historyTitle">Istoric conturi MT5</div>
     <div class="modal-sub" id="historySub">Toate conturile folosite de acest client</div>
     <div id="historyContent" style="font-size:13px;">Se încarcă...</div>
+  </div>
+</div>
+
+<!-- 🆕 MODAL EXTINDE ABONAMENT GRATUIT -->
+<div class="modal-overlay" id="extendModal" onclick="closeExtendModal(event)">
+  <div class="modal" style="max-width:520px">
+    <button class="modal-close" onclick="closeExtendModal()">✕</button>
+    <div class="modal-title">📅 Extinde abonament gratuit</div>
+    <div class="modal-sub" id="extendSub">Selectează clientul și opțiunile</div>
+
+    <input type="hidden" id="extendUserId">
+
+    <div class="form-group" style="margin-bottom:12px">
+      <label class="form-label">Cu câte zile?</label>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px" id="daysQuickButtons">
+        <button type="button" class="action-btn" onclick="setDays(3)">3 zile</button>
+        <button type="button" class="action-btn" onclick="setDays(7)">7 zile</button>
+        <button type="button" class="action-btn" onclick="setDays(14)">14 zile</button>
+        <button type="button" class="action-btn" onclick="setDays(30)">30 zile</button>
+        <button type="button" class="action-btn" onclick="setDays(60)">60 zile</button>
+      </div>
+      <input class="form-control" type="number" id="extendDays" min="1" max="365" placeholder="Sau scrie custom (1-365)" value="7">
+    </div>
+
+    <div class="form-group" style="margin-bottom:12px">
+      <label class="form-label">Motiv extindere</label>
+      <select class="form-control" id="extendReason">
+        <option value="loyalty">🏆 Loialitate (client vechi)</option>
+        <option value="compensation">⚠️ Compensare (problemă tehnică)</option>
+        <option value="gift">🎁 Cadou (gratuitate surpriză)</option>
+        <option value="friend_bonus">👥 Prieten/Bonus personal</option>
+        <option value="apology">🙏 Scuze (eroare de la mine)</option>
+        <option value="other">📝 Alt motiv</option>
+      </select>
+    </div>
+
+    <div class="form-group" style="margin-bottom:12px">
+      <label class="form-label">Note (opțional)</label>
+      <textarea class="form-control" id="extendNotes" rows="2" placeholder="Note pentru tine, vor apărea în istoric..."></textarea>
+    </div>
+
+    <div class="form-group" style="margin-bottom:16px;padding:10px;background:var(--surface);border-radius:8px;border:1px solid var(--border)">
+      <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text);cursor:pointer">
+        <input type="checkbox" id="extendSyncStripe" checked style="margin:0">
+        <span>💳 Sincronizează cu Stripe (recomandat — amână data de facturare cu zilele adăugate)</span>
+      </label>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px;padding-left:24px">
+        ⚠️ Fără sync, clientul va fi facturat la data inițială deși are zile gratis în plus.
+      </div>
+    </div>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn-secondary" onclick="closeExtendModal()">Anulează</button>
+      <button class="btn-primary" onclick="submitExtension()" id="extendSubmitBtn">✅ Confirmă extinderea</button>
+    </div>
+    <div class="msg-ok" id="extendOk"></div>
+    <div class="msg-err" id="extendErr"></div>
+  </div>
+</div>
+
+<!-- 🆕 MODAL ADAUGĂ TRIAL GRATUIT -->
+<div class="modal-overlay" id="trialModal" onclick="closeTrialModal(event)">
+  <div class="modal" style="max-width:580px">
+    <button class="modal-close" onclick="closeTrialModal()">✕</button>
+    <div class="modal-title">🎁 Adaugă trial gratuit</div>
+    <div class="modal-sub">Pentru prieteni, testeri, influenceri sau demo-uri (FĂRĂ plată Stripe)</div>
+
+    <div class="form-grid">
+      <div class="form-group">
+        <label class="form-label">Email *</label>
+        <input class="form-control" type="email" id="trialEmail" placeholder="prieten@email.com">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Plan *</label>
+        <select class="form-control" id="trialPlan" onchange="onTrialPlanChange()">
+          <option value="basic">Basic (1 EA, 1 MT5)</option>
+          <option value="pro" selected>Pro (3 EA, 2 MT5)</option>
+          <option value="full_access">Full Access (6 EA, 3 MT5)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Durată (zile) *</label>
+        <input class="form-control" type="number" id="trialDays" min="1" max="365" value="14">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Sursă *</label>
+        <select class="form-control" id="trialSource">
+          <option value="friend">👥 Prieten</option>
+          <option value="influencer">📢 Influencer</option>
+          <option value="tester">🧪 Tester</option>
+          <option value="demo">🎬 Demo</option>
+          <option value="other">📝 Altul</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="form-group" style="margin-bottom:12px">
+      <label class="form-label">Cont MT5 (opțional — îl poți adăuga și mai târziu)</label>
+      <input class="form-control" type="text" id="trialMt5" placeholder="ex: 12345678">
+    </div>
+
+    <div class="form-group" id="trialEasContainer" style="margin-bottom:12px">
+      <label class="form-label">EA-uri (selectează maxim <span id="trialMaxEas">3</span>)</label>
+      <div id="trialEasList" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:10px;background:var(--surface);border-radius:8px;border:1px solid var(--border)">
+        <label style="font-size:12px;display:flex;align-items:center;gap:6px"><input type="checkbox" class="trial-ea-cb" value="ZigZag Fibo EA"> ZigZag Fibo EA</label>
+        <label style="font-size:12px;display:flex;align-items:center;gap:6px"><input type="checkbox" class="trial-ea-cb" value="Killer Indices EA"> Killer Indices EA</label>
+        <label style="font-size:12px;display:flex;align-items:center;gap:6px"><input type="checkbox" class="trial-ea-cb" value="Meneger Stock EA"> Meneger Stock EA</label>
+        <label style="font-size:12px;display:flex;align-items:center;gap:6px"><input type="checkbox" class="trial-ea-cb" value="Range Breakout EA"> Range Breakout EA</label>
+        <label style="font-size:12px;display:flex;align-items:center;gap:6px"><input type="checkbox" class="trial-ea-cb" value="Robert Long EA"> Robert Long EA</label>
+        <label style="font-size:12px;display:flex;align-items:center;gap:6px"><input type="checkbox" class="trial-ea-cb" value="Simple BuyDay EA"> Simple BuyDay EA</label>
+      </div>
+      <div id="trialEasNote" style="font-size:11px;color:var(--muted);margin-top:4px">💡 Full Access primește automat toate 6 EA-urile</div>
+    </div>
+
+    <div class="form-group" style="margin-bottom:16px">
+      <label class="form-label">Note (opțional)</label>
+      <textarea class="form-control" id="trialNotes" rows="2" placeholder="ex: prieten din Cluj, vrea să testeze 2 săptămâni..."></textarea>
+    </div>
+
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn-secondary" onclick="closeTrialModal()">Anulează</button>
+      <button class="btn-primary" onclick="submitTrial()" id="trialSubmitBtn">🎁 Creează trial</button>
+    </div>
+    <div class="msg-ok" id="trialOk"></div>
+    <div class="msg-err" id="trialErr"></div>
+  </div>
+</div>
+
+<!-- 🆕 MODAL ISTORIC EXTINDERI -->
+<div class="modal-overlay" id="extLogModal" onclick="closeExtLogModal(event)">
+  <div class="modal">
+    <button class="modal-close" onclick="closeExtLogModal()">✕</button>
+    <div class="modal-title">📋 Istoric extinderi gratuite</div>
+    <div class="modal-sub" id="extLogSub">Toate extinderile acordate</div>
+    <div id="extLogContent" style="font-size:13px;">Se încarcă...</div>
   </div>
 </div>
 
@@ -520,12 +738,13 @@ function showDashboard(){
 function showTab(id, el){
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   el.classList.add('active');
-  ['overview','clients','abuse','add','discord','activity'].forEach(t=>{
+  ['overview','clients','abuse','add','discord','activity','trials'].forEach(t=>{
     document.getElementById('tab-'+t).style.display = t===id ? 'block' : 'none';
   });
   if(id==='clients') loadClients();
   if(id==='abuse') loadAbuse();
   if(id==='activity') loadActivityMonitor();
+  if(id==='trials') loadTrials();
 }
 
 async function loadAll(){
@@ -1118,6 +1337,8 @@ function renderActivityClients(clients){
         <div class="client-meta">${(c.plan||'?').toUpperCase()} • ${c.active_eas_count||0} EA-uri • ${c.active_accounts_count||0} conturi MT5 • ${lastText}</div>
       </div>
       <span class="pill ${statusPill}">${statusText}</span>
+      <button class="action-btn" onclick="openExtendModal(${c.user_id},'${(c.email||'').replace(/'/g,"\\'")}')" title="Extinde abonament gratis">📅 Extinde</button>
+      <button class="action-btn" onclick="openExtLogModal(${c.user_id},'${(c.email||'').replace(/'/g,"\\'")}')" title="Istoric extinderi">📋 Istoric</button>
     </div>`;
   }).join('');
 }
@@ -1221,6 +1442,377 @@ function renderActivityRecentCheckins(checkins){
       <td style="font-size:12px;color:var(--muted)">${timeAgo}</td>
     </tr>`;
   }).join('');
+}
+
+// ─── 🆕 FAZA 2: EXTINDE ABONAMENT GRATUIT ──────────────────────────────────────
+
+function openExtendModal(userId, email){
+  document.getElementById('extendUserId').value = userId;
+  document.getElementById('extendSub').textContent = `Client: ${email}`;
+  document.getElementById('extendDays').value = 7;
+  document.getElementById('extendReason').value = 'loyalty';
+  document.getElementById('extendNotes').value = '';
+  document.getElementById('extendSyncStripe').checked = true;
+  document.getElementById('extendOk').style.display = 'none';
+  document.getElementById('extendErr').style.display = 'none';
+  document.getElementById('extendModal').classList.add('open');
+}
+
+function closeExtendModal(e){
+  if(e && e.target.id !== 'extendModal' && e.target.className !== 'modal-close') return;
+  document.getElementById('extendModal').classList.remove('open');
+}
+
+function setDays(n){
+  document.getElementById('extendDays').value = n;
+}
+
+async function submitExtension(){
+  const userId = document.getElementById('extendUserId').value;
+  const days = parseInt(document.getElementById('extendDays').value);
+  const reason = document.getElementById('extendReason').value;
+  const notes = document.getElementById('extendNotes').value.trim();
+  const syncStripe = document.getElementById('extendSyncStripe').checked;
+  const ok = document.getElementById('extendOk');
+  const err = document.getElementById('extendErr');
+  ok.style.display='none'; err.style.display='none';
+
+  if(!days || days < 1 || days > 365){
+    err.textContent = 'Zilele trebuie între 1 și 365!';
+    err.style.display = 'block';
+    return;
+  }
+
+  const btn = document.getElementById('extendSubmitBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Se procesează...';
+
+  try {
+    const r = await fetch(SERVER+'/admin/extend-subscription', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','x-admin-key':ADMIN_KEY},
+      body: JSON.stringify({
+        user_id: userId,
+        days: days,
+        reason_tag: reason,
+        reason_notes: notes || null,
+        sync_stripe: syncStripe
+      })
+    });
+    const data = await r.json();
+    
+    if(data.success){
+      const stripeMsg = data.stripe_synced 
+        ? '✅ Stripe sincronizat'
+        : (syncStripe ? `⚠️ Stripe NU sincronizat: ${data.stripe_error || 'unknown'}` : 'ℹ️ Stripe sync dezactivat');
+      ok.innerHTML = `✅ <b>Extindere reușită!</b><br>📅 Nouă expirare: ${new Date(data.new_period_end).toLocaleDateString('ro-RO')}<br>💳 ${stripeMsg}`;
+      ok.style.display = 'block';
+      // Refresh după 2 sec
+      setTimeout(() => {
+        closeExtendModal();
+        loadActivityMonitor();
+        loadClients();
+      }, 2500);
+    } else {
+      err.textContent = 'Eroare: ' + (data.error || JSON.stringify(data));
+      err.style.display = 'block';
+    }
+  } catch(e){
+    err.textContent = 'Eroare conexiune: ' + e.message;
+    err.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '✅ Confirmă extinderea';
+  }
+}
+
+// ─── 🆕 MODAL ISTORIC EXTINDERI ────────────────────────────────────────────────
+
+async function openExtLogModal(userId, email){
+  document.getElementById('extLogSub').textContent = email || 'Client necunoscut';
+  document.getElementById('extLogContent').innerHTML = 'Se încarcă...';
+  document.getElementById('extLogModal').classList.add('open');
+
+  try {
+    const r = await fetch(SERVER+'/admin/extensions-log?user_id='+userId, {
+      headers:{ 'x-admin-key': ADMIN_KEY }
+    });
+    const data = await r.json();
+    
+    if(!data.length){
+      document.getElementById('extLogContent').innerHTML = '<div style="color:var(--muted);text-align:center;padding:12px">Niciun extending acordat acestui client</div>';
+      return;
+    }
+
+    const reasonLabels = {
+      compensation: '⚠️ Compensare', loyalty: '🏆 Loialitate', gift: '🎁 Cadou',
+      friend_bonus: '👥 Prieten', apology: '🙏 Scuze', other: '📝 Altul'
+    };
+
+    let html = '<table style="margin-top:8px"><thead><tr><th>Data</th><th>Zile</th><th>Motiv</th><th>Note</th><th>Stripe</th></tr></thead><tbody>';
+    data.forEach(e => {
+      const date = new Date(e.created_at).toLocaleDateString('ro-RO');
+      const stripePill = e.stripe_synced
+        ? '<span class="pill pill-green">✓ Sync</span>'
+        : '<span class="pill pill-amber">✕ No sync</span>';
+      html += `<tr>
+        <td style="font-size:12px">${date}</td>
+        <td style="font-family:var(--mono);color:var(--accent);font-weight:700">+${e.days_added}</td>
+        <td style="font-size:12px">${reasonLabels[e.reason_tag]||e.reason_tag}</td>
+        <td style="font-size:12px;color:var(--muted)">${e.reason_notes||'—'}</td>
+        <td>${stripePill}</td>
+      </tr>`;
+    });
+    html += '</tbody></table>';
+    document.getElementById('extLogContent').innerHTML = html;
+  } catch(e){
+    document.getElementById('extLogContent').innerHTML = '<div style="color:var(--danger)">Eroare la încărcare</div>';
+  }
+}
+
+function closeExtLogModal(e){
+  if(e && e.target.id !== 'extLogModal' && e.target.className !== 'modal-close') return;
+  document.getElementById('extLogModal').classList.remove('open');
+}
+
+// ─── 🆕 FAZA 3: TRIAL GRATUIT ──────────────────────────────────────────────────
+
+let allTrials = { active: [], expired: [] };
+
+async function loadTrials(){
+  document.getElementById('trialsLastUpdate').textContent = 'Se încarcă...';
+  try {
+    const [activeRes, expiredRes] = await Promise.all([
+      fetch(SERVER+'/admin/trial-list?status=active', { headers:{ 'x-admin-key': ADMIN_KEY }}),
+      fetch(SERVER+'/admin/trial-list?status=expired', { headers:{ 'x-admin-key': ADMIN_KEY }})
+    ]);
+    allTrials.active = await activeRes.json();
+    allTrials.expired = await expiredRes.json();
+    
+    renderTrialMetrics();
+    renderTrialsActive();
+    renderTrialsExpired();
+    
+    const updTime = new Date().toLocaleTimeString('ro-RO');
+    document.getElementById('trialsLastUpdate').textContent = `Actualizat la ${updTime} • ${allTrials.active.length} active, ${allTrials.expired.length} expirate`;
+  } catch(e){
+    document.getElementById('trialsLastUpdate').textContent = '❌ Eroare: ' + e.message;
+  }
+}
+
+function renderTrialMetrics(){
+  const active = allTrials.active.length;
+  const expired = allTrials.expired.length;
+  const total = active + expired;
+  const expiring = allTrials.active.filter(t => {
+    const days = parseInt(t.days_left) || 0;
+    return days >= 0 && days <= 7;
+  }).length;
+  
+  document.getElementById('trialActive').textContent = active;
+  document.getElementById('trialExpiring').textContent = expiring;
+  document.getElementById('trialExpired').textContent = expired;
+  document.getElementById('trialTotal').textContent = total;
+}
+
+function renderTrialsActive(){
+  const tbody = document.getElementById('trialsActiveTable');
+  if(!allTrials.active.length){
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:24px">Niciun trial activ. Apasă "➕ Adaugă trial nou" pentru a începe!</td></tr>';
+    return;
+  }
+  
+  const sourceLabels = {
+    friend: '👥 Prieten', influencer: '📢 Influencer', tester: '🧪 Tester',
+    demo: '🎬 Demo', other: '📝 Altul'
+  };
+  
+  tbody.innerHTML = allTrials.active.map(t => {
+    const days = parseInt(t.days_left) || 0;
+    const daysColor = days <= 1 ? 'var(--danger)' : (days <= 3 ? 'var(--warn)' : 'var(--accent)');
+    const expDate = new Date(t.current_period_end).toLocaleDateString('ro-RO');
+    return `<tr>
+      <td style="font-size:12px">${t.email||'—'}</td>
+      <td><span class="pill pill-blue">${(t.plan||'?').toUpperCase()}</span></td>
+      <td style="font-size:12px">${sourceLabels[t.trial_source]||t.trial_source||'—'}</td>
+      <td style="font-family:var(--mono);font-size:12px">${expDate}</td>
+      <td style="font-family:var(--mono);color:${daysColor};font-weight:700;text-align:center">${days} zile</td>
+      <td style="text-align:center">${t.active_eas||0}</td>
+      <td>
+        <button class="action-btn" onclick="openExtendModal(${t.user_id},'${(t.email||'').replace(/'/g,"\\'")}')" title="Extinde trial">📅</button>
+        <button class="action-btn danger" onclick="cancelTrial(${t.subscription_id},'${(t.email||'').replace(/'/g,"\\'")}')" title="Anulează trial">🚫</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function renderTrialsExpired(){
+  const tbody = document.getElementById('trialsExpiredTable');
+  if(!allTrials.expired.length){
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:24px">Niciun trial expirat în istoric</td></tr>';
+    return;
+  }
+  
+  const sourceLabels = {
+    friend: '👥 Prieten', influencer: '📢 Influencer', tester: '🧪 Tester',
+    demo: '🎬 Demo', other: '📝 Altul'
+  };
+  
+  tbody.innerHTML = allTrials.expired.map(t => {
+    const expDate = new Date(t.current_period_end).toLocaleDateString('ro-RO');
+    return `<tr>
+      <td style="font-size:12px;color:var(--muted)">${t.email||'—'}</td>
+      <td><span class="pill pill-blue">${(t.plan||'?').toUpperCase()}</span></td>
+      <td style="font-size:12px">${sourceLabels[t.trial_source]||t.trial_source||'—'}</td>
+      <td style="font-family:var(--mono);font-size:12px;color:var(--muted)">${expDate}</td>
+      <td style="font-size:12px;color:var(--muted)">${t.trial_notes||'—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+function openTrialModal(){
+  document.getElementById('trialEmail').value = '';
+  document.getElementById('trialPlan').value = 'pro';
+  document.getElementById('trialDays').value = 14;
+  document.getElementById('trialSource').value = 'friend';
+  document.getElementById('trialMt5').value = '';
+  document.getElementById('trialNotes').value = '';
+  document.querySelectorAll('.trial-ea-cb').forEach(cb => cb.checked = false);
+  document.getElementById('trialOk').style.display = 'none';
+  document.getElementById('trialErr').style.display = 'none';
+  onTrialPlanChange(); // setează limitele EA-urilor
+  document.getElementById('trialModal').classList.add('open');
+}
+
+function closeTrialModal(e){
+  if(e && e.target.id !== 'trialModal' && e.target.className !== 'modal-close') return;
+  document.getElementById('trialModal').classList.remove('open');
+}
+
+function onTrialPlanChange(){
+  const plan = document.getElementById('trialPlan').value;
+  const maxEAs = plan === 'full_access' ? 6 : (plan === 'pro' ? 3 : 1);
+  document.getElementById('trialMaxEas').textContent = maxEAs;
+  
+  if(plan === 'full_access'){
+    // Full primește toate automat → checkbox-uri toate bifate și disabled
+    document.querySelectorAll('.trial-ea-cb').forEach(cb => {
+      cb.checked = true;
+      cb.disabled = true;
+    });
+    document.getElementById('trialEasNote').innerHTML = '✅ Full Access primește automat toate 6 EA-urile';
+  } else {
+    document.querySelectorAll('.trial-ea-cb').forEach(cb => {
+      cb.disabled = false;
+    });
+    document.getElementById('trialEasNote').innerHTML = `💡 Selectează maxim ${maxEAs} EA-uri pentru planul ${plan.toUpperCase()}`;
+  }
+}
+
+async function submitTrial(){
+  const email = document.getElementById('trialEmail').value.trim();
+  const plan = document.getElementById('trialPlan').value;
+  const days = parseInt(document.getElementById('trialDays').value);
+  const source = document.getElementById('trialSource').value;
+  const mt5 = document.getElementById('trialMt5').value.trim();
+  const notes = document.getElementById('trialNotes').value.trim();
+  const selectedEAs = Array.from(document.querySelectorAll('.trial-ea-cb:checked')).map(cb => cb.value);
+  
+  const ok = document.getElementById('trialOk');
+  const err = document.getElementById('trialErr');
+  ok.style.display='none'; err.style.display='none';
+
+  // Validări
+  if(!email){
+    err.textContent = 'Emailul e obligatoriu!';
+    err.style.display = 'block';
+    return;
+  }
+  if(!email.includes('@')){
+    err.textContent = 'Email invalid!';
+    err.style.display = 'block';
+    return;
+  }
+  if(!days || days < 1 || days > 365){
+    err.textContent = 'Zilele trebuie între 1 și 365!';
+    err.style.display = 'block';
+    return;
+  }
+  
+  // Verificare limite EA-uri pentru basic/pro
+  if(plan !== 'full_access'){
+    const maxEAs = plan === 'pro' ? 3 : 1;
+    if(selectedEAs.length === 0){
+      err.textContent = `Selectează cel puțin 1 EA pentru planul ${plan.toUpperCase()}!`;
+      err.style.display = 'block';
+      return;
+    }
+    if(selectedEAs.length > maxEAs){
+      err.textContent = `Planul ${plan.toUpperCase()} permite maxim ${maxEAs} EA-uri!`;
+      err.style.display = 'block';
+      return;
+    }
+  }
+
+  const btn = document.getElementById('trialSubmitBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Se creează...';
+
+  try {
+    const r = await fetch(SERVER+'/admin/create-trial', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','x-admin-key':ADMIN_KEY},
+      body: JSON.stringify({
+        email: email,
+        plan: plan,
+        days: days,
+        trial_source: source,
+        trial_notes: notes || null,
+        mt5_account: mt5 || null,
+        ea_names: plan === 'full_access' ? null : selectedEAs
+      })
+    });
+    const data = await r.json();
+    
+    if(data.success){
+      ok.innerHTML = `✅ <b>Trial creat cu succes!</b><br>📧 ${data.email}<br>📦 ${data.plan.toUpperCase()} • ${data.days} zile<br>📅 Expiră: ${new Date(data.trial_end).toLocaleDateString('ro-RO')}<br>🤖 EA-uri: ${data.eas_assigned.length}`;
+      ok.style.display = 'block';
+      setTimeout(() => {
+        closeTrialModal();
+        loadTrials();
+      }, 3000);
+    } else {
+      err.textContent = 'Eroare: ' + (data.error || JSON.stringify(data));
+      err.style.display = 'block';
+    }
+  } catch(e){
+    err.textContent = 'Eroare conexiune: ' + e.message;
+    err.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🎁 Creează trial';
+  }
+}
+
+async function cancelTrial(subId, email){
+  if(!confirm(`Ești sigur că vrei să anulezi trial-ul pentru ${email}?\n\nVa pierde accesul imediat și va fi marcat ca expirat în istoric.`)) return;
+  
+  try {
+    const r = await fetch(SERVER+'/admin/trial/'+subId, {
+      method: 'DELETE',
+      headers: {'x-admin-key':ADMIN_KEY}
+    });
+    const data = await r.json();
+    
+    if(data.success){
+      alert('✅ Trial anulat. Rolul Discord și accesul au fost retrase.');
+      loadTrials();
+    } else {
+      alert('❌ Eroare: ' + (data.error || 'unknown'));
+    }
+  } catch(e){
+    alert('❌ Eroare conexiune: ' + e.message);
+  }
 }
 
 // Check session
