@@ -2070,6 +2070,138 @@ app.get('/admin/licenses', adminAuth, async (req, res) => {
   res.json(result.rows);
 });
 
+// ─── 🆕 ACTIVITATE LIVE: Monitor pentru tab-ul nou din admin ──────────────────
+// Returnează toate datele necesare pentru dashboard-ul Activitate Live
+// Citește din: access_log_v2, users, subscriptions, ea_licenses, mt5_accounts
+app.get('/admin/activity-monitor', adminAuth, async (req, res) => {
+  try {
+    // 1. Sumar status clienți (activi/inactivi/dispăruți/erori azi)
+    const summaryQuery = await pool.query(`
+      SELECT
+        (SELECT COUNT(DISTINCT user_id) FROM access_log_v2 
+         WHERE checked_at > NOW() - INTERVAL '2 hours' AND result = 'VALID_NEW' AND user_id IS NOT NULL) AS active_now,
+        (SELECT COUNT(DISTINCT user_id) FROM access_log_v2 
+         WHERE user_id IS NOT NULL AND result = 'VALID_NEW' 
+         AND user_id NOT IN (
+           SELECT DISTINCT user_id FROM access_log_v2 
+           WHERE checked_at > NOW() - INTERVAL '24 hours' AND user_id IS NOT NULL
+         )
+         AND user_id IN (
+           SELECT DISTINCT user_id FROM access_log_v2 
+           WHERE checked_at > NOW() - INTERVAL '48 hours' AND user_id IS NOT NULL
+         )
+        ) AS inactive_24_48h,
+        (SELECT COUNT(*) FROM access_log_v2 
+         WHERE checked_at > NOW() - INTERVAL '24 hours' AND result != 'VALID_NEW' AND result != 'VALID_OLD' AND result != 'DOWNLOAD') AS errors_today
+    `);
+
+    // 2. Sumar financiar (clienți activi + venit)
+    const financialQuery = await pool.query(`
+      SELECT 
+        COUNT(*) AS total_active,
+        COUNT(CASE WHEN plan = 'basic' THEN 1 END) AS basic_count,
+        COUNT(CASE WHEN plan = 'pro' THEN 1 END) AS pro_count,
+        COUNT(CASE WHEN plan = 'full_access' THEN 1 END) AS full_count,
+        COUNT(CASE WHEN current_period_end < NOW() + INTERVAL '7 days' AND current_period_end > NOW() THEN 1 END) AS expiring_soon
+      FROM subscriptions
+      WHERE status = 'active'
+    `);
+
+    // 3. Lista clienți cu status (pentru lista de selectare)
+    const clientsListQuery = await pool.query(`
+      SELECT 
+        u.id AS user_id,
+        u.email,
+        u.discord_username,
+        s.plan,
+        s.status,
+        s.current_period_end,
+        s.max_mt5_accounts,
+        (SELECT MAX(checked_at) FROM access_log_v2 WHERE user_id = u.id AND result = 'VALID_NEW') AS last_checkin,
+        (SELECT COUNT(*) FROM ea_licenses WHERE user_id = u.id AND status = 'active') AS active_eas_count,
+        (SELECT COUNT(*) FROM mt5_accounts WHERE user_id = u.id AND is_active = true) AS active_accounts_count
+      FROM users u
+      LEFT JOIN subscriptions s ON s.user_id = u.id
+      WHERE s.status IS NOT NULL
+      ORDER BY s.current_period_end DESC NULLS LAST
+    `);
+
+    // 4. Top EA-uri în ultimele 7 zile
+    const topEasQuery = await pool.query(`
+      SELECT 
+        ea_name,
+        COUNT(*) AS checkins_count,
+        COUNT(DISTINCT account_number) AS unique_accounts
+      FROM access_log_v2
+      WHERE checked_at > NOW() - INTERVAL '7 days'
+        AND result = 'VALID_NEW'
+        AND ea_name IS NOT NULL
+      GROUP BY ea_name
+      ORDER BY checkins_count DESC
+      LIMIT 6
+    `);
+
+    // 5. Activitate săptămânală (ultimele 7 zile, grupată pe zile)
+    const weeklyActivityQuery = await pool.query(`
+      SELECT 
+        DATE(checked_at AT TIME ZONE 'Europe/Bucharest') AS day,
+        COUNT(*) AS checkins,
+        COUNT(DISTINCT account_number) AS unique_accounts
+      FROM access_log_v2
+      WHERE checked_at > NOW() - INTERVAL '7 days'
+        AND result = 'VALID_NEW'
+      GROUP BY DATE(checked_at AT TIME ZONE 'Europe/Bucharest')
+      ORDER BY day ASC
+    `);
+
+    // 6. Ultimele check-in-uri (10 recente)
+    const recentCheckinsQuery = await pool.query(`
+      SELECT 
+        l.user_id,
+        u.email,
+        l.ea_name,
+        l.account_number,
+        l.result,
+        l.hmac_valid,
+        l.checked_at
+      FROM access_log_v2 l
+      LEFT JOIN users u ON u.id = l.user_id
+      WHERE l.result = 'VALID_NEW'
+      ORDER BY l.checked_at DESC
+      LIMIT 10
+    `);
+
+    // 7. Conturi MT5 active (mapă brokeri)
+    const mt5AccountsQuery = await pool.query(`
+      SELECT 
+        m.account_number,
+        m.broker,
+        m.added_at,
+        u.email,
+        s.plan
+      FROM mt5_accounts m
+      JOIN users u ON u.id = m.user_id
+      LEFT JOIN subscriptions s ON s.id = m.subscription_id
+      WHERE m.is_active = true
+      ORDER BY m.added_at DESC
+    `);
+
+    res.json({
+      summary: summaryQuery.rows[0],
+      financial: financialQuery.rows[0],
+      clients: clientsListQuery.rows,
+      top_eas: topEasQuery.rows,
+      weekly_activity: weeklyActivityQuery.rows,
+      recent_checkins: recentCheckinsQuery.rows,
+      mt5_accounts: mt5AccountsQuery.rows,
+      generated_at: new Date().toISOString()
+    });
+  } catch (e) {
+    console.error('Activity monitor error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/admin/logs', adminAuth, async (req, res) => {
   const { account } = req.query;
   let result;
