@@ -1780,6 +1780,16 @@ app.post('/webhook', async (req, res) => {
       
       const newStatus = 'active';
       
+      // 🆕 FIX CRITIC: Verific plan-ul vechi ÎNAINTE de update
+      // ca să știm dacă trebuie să resetăm ea_licenses sau doar să le extindem
+      const oldPlanQuery = await pool.query(
+        'SELECT plan FROM subscriptions WHERE user_id=$1 LIMIT 1',
+        [user.id]
+      );
+      const oldPlan = oldPlanQuery.rows[0]?.plan || null;
+      const planChanged = oldPlan !== newPlan;
+      console.log(`Webhook subscription.updated: ${user.email} → vechi=${oldPlan}, nou=${newPlan}, schimbat=${planChanged}`);
+      
       // Update subscription în DB (sistem nou)
       await pool.query(
         `UPDATE subscriptions SET plan=$1, max_mt5_accounts=$2, status=$3, current_period_end=$4 
@@ -1854,9 +1864,9 @@ app.post('/webhook', async (req, res) => {
         [legacyPlan, legacyExpires, user.email]
       );
       
-      // 🆕 SESIUNEA 14: La schimbare plan, șterg EA-urile vechi
-      // - Pentru full_access → adaug toate 6 automat
-      // - Pentru basic/pro → șterg toate (clientul alege din portal)
+      // 🆕 FIX CRITIC: ea_licenses se șterg DOAR dacă planul s-a schimbat
+      // Altfel (extindere simplă, reactivare, etc), păstrăm EA-urile clientului
+      // și doar le actualizăm expires_at la noua perioadă
       const EA_MAP = {
         'ZigZag Fibo EA': 'Fibo_Final_V3.ex5',
         'Killer Indices EA': 'Killer_Indices_RobertAbo_V3.ex5',
@@ -1866,24 +1876,36 @@ app.post('/webhook', async (req, res) => {
         'Simple BuyDay EA': 'Simple__BuyDay_EAABO_V3.ex5'
       };
       
-      // Șterg toate EA-urile vechi
-      await pool.query('DELETE FROM ea_licenses WHERE user_id=$1', [user.id]);
-      
       // Iau sub_id pentru folosire ulterioară
       const subQuery = await pool.query('SELECT id FROM subscriptions WHERE user_id=$1', [user.id]);
       const subIdForUser = subQuery.rows[0]?.id;
       
-      if (newPlan === 'full_access' && subIdForUser) {
-        // Full = adaug toate 6 automat
-        for (const [eaName, fileName] of Object.entries(EA_MAP)) {
-          await pool.query(
-            `INSERT INTO ea_licenses (user_id, subscription_id, ea_name, file_name, status, activated_at, expires_at)
-             VALUES ($1, $2, $3, $4, 'active', NOW(), $5)`,
-            [user.id, subIdForUser, eaName, fileName, periodEnd.toISOString()]
-          );
+      if (planChanged) {
+        // 🔄 PLAN S-A SCHIMBAT: șterg EA-urile vechi (limitele/conținutul planului diferă)
+        console.log(`🔄 Plan schimbat (${oldPlan} → ${newPlan}), resetez ea_licenses pentru ${user.email}`);
+        await pool.query('DELETE FROM ea_licenses WHERE user_id=$1', [user.id]);
+        
+        if (newPlan === 'full_access' && subIdForUser) {
+          // Full = adaug toate 6 automat
+          for (const [eaName, fileName] of Object.entries(EA_MAP)) {
+            await pool.query(
+              `INSERT INTO ea_licenses (user_id, subscription_id, ea_name, file_name, status, activated_at, expires_at)
+               VALUES ($1, $2, $3, $4, 'active', NOW(), $5)`,
+              [user.id, subIdForUser, eaName, fileName, periodEnd.toISOString()]
+            );
+          }
         }
+        // Pentru basic/pro: rămân fără EA-uri, clientul va alege din portal
+      } else {
+        // ✅ PLAN ACELAȘI: doar extind expires_at pentru ea_licenses existente
+        // (cazul extinderii gratuite, reactivării după pauză, etc)
+        const updRes = await pool.query(
+          `UPDATE ea_licenses SET expires_at=$1, status='active' 
+           WHERE user_id=$2 AND status IN ('active', 'expired')`,
+          [periodEnd.toISOString(), user.id]
+        );
+        console.log(`✅ Plan neschimbat (${newPlan}), ea_licenses păstrate pentru ${user.email} — ${updRes.rowCount} licențe extinse până ${periodEnd.toISOString().split('T')[0]}`);
       }
-      // Pentru basic/pro: rămân fără EA-uri, clientul va alege din portal
       
       // Update Discord rol
       await addDiscordRole(user.email, newPlan === 'full_access' ? 'full' : newPlan);
